@@ -11,14 +11,17 @@ from joblib import Parallel, delayed
 from ops import Operators, register_all_ops
 from subutils import cache
 
-
+import gc
 def procfunc(lep, df, field: List[str], scores, symbol, start_time, end_time):
 
     register_all_ops()
 
     out = lep.expression(df, field=field[0], start_time=start_time, end_time=end_time)
     out = out.rename(field[1])
+    out = dd.from_pandas(out,chunksize=100000000)
+
     print(f"done field: {field[1]}")
+    #gc.collect()
     return out
 
 
@@ -117,7 +120,7 @@ class LocalExpressionProvider(ExpressionProvider):
         return series
 
 
-def procData(df, fieldlist, nproc, start_time, end_time,label=False):
+def procData(df, fieldlist, nproc, dates ,label=False):
 
     try:
         symbols = cache("symbols")
@@ -126,16 +129,20 @@ def procData(df, fieldlist, nproc, start_time, end_time,label=False):
         cache("symbols", symbols)
     try:
         btcdata = cache("BTCBUSD.parquet")
+        del btcdata
 
     except:
         btcdata = df[df["$symbol"] == "BTCBUSD"].compute()
         cache("BTCBUSD", btcdata)
+        del btcdata
     try:
         ethdata = cache("ETHBUSD.parquet")
+        del ethdata
 
     except:
         ethdata = df[df["$symbol"] == "ETHBUSD"].compute()
         cache("ETHBUSD", ethdata)
+        del ethdata
     lep = LocalExpressionProvider()
     df = df.astype(
         {
@@ -147,41 +154,51 @@ def procData(df, fieldlist, nproc, start_time, end_time,label=False):
             "$vwap": "float32",
             "$adj": "float32",
         }
-    ).compute()
+    )
     scores = {}
-    if nproc != 1:
-        with Parallel(n_jobs=nproc) as parallel:
-            for symbol in symbols:
+    for start_time, end_time in dates:
+        
+        if nproc != 1:
+            with Parallel(n_jobs=nproc) as parallel:
+                for symbol in symbols:
 
-                subdf = df[df["$symbol"] == symbol]
+                    subdf = df[df["$symbol"] == symbol].compute()
 
-                results = parallel(
-                    delayed(procfunc)(
-                        lep, subdf, field, scores, symbol, start_time, end_time
+                    results = parallel(
+                        delayed(procfunc)(
+                            lep, subdf, field, scores, symbol, start_time, end_time
+                        )
+                        for field in fieldlist
                     )
-                    for field in fieldlist
-                )
-
+                    del subdf
+                    results = dd.multi.concat(results,axis=1)
+                    #results = results.repartition(npartitions=1000)
+                    #results = pd.DataFrame(results).T
+                    #print(results.memory_usage_per_partition())
+                    if label == False:
+                        path = cache(f"{symbol}_cached.parquet", results)
+                    else:
+                        path = cache(f"{symbol}_label_cached.parquet", results)
+                    del results
+                    #gc.collect()
+                    scores[symbol] = path
+        else:
+            for symbol in symbols:
+                subdf = df[df["$symbol"] == symbol].compute()
+                results = []
+                for field in fieldlist:
+                    results.append(
+                        procfunc(lep, subdf, field, scores, symbol, start_time, end_time)
+                    )
+                del subdf
                 results = pd.DataFrame(results).T
                 if label == False:
                     path = cache(f"{symbol}_cached.parquet", results)
                 else:
                     path = cache(f"{symbol}_label_cached.parquet", results)
                 scores[symbol] = path
-    else:
-        for symbol in symbols:
-            subdf = df[df["$symbol"] == symbol]
-            results = []
-            for field in fieldlist:
-                results.append(
-                    procfunc(lep, subdf, field, scores, symbol, start_time, end_time)
-                )
-            results = pd.DataFrame(results).T
-            if label == False:
-                path = cache(f"{symbol}_cached.parquet", results)
-            else:
-                path = cache(f"{symbol}_label_cached.parquet", results)
-            scores[symbol] = path
+                #gc.collect()
+                del results
     return scores
 
 

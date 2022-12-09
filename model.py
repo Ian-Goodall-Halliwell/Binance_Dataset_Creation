@@ -16,8 +16,8 @@ if __name__ == "__main__":
     if not os.path.exists(WORKING_DIR):
         os.mkdir(WORKING_DIR)
     client = Client()
-    nproc = -1
-    set(scheduler="distributed", num_workers=nproc)
+    nproc = 7
+    set(scheduler="distributed", num_workers=nproc//2)
     labels = [
         "Ref($close, -1)/$close - 1",
         "Ref($close, -5)/$close -1",
@@ -36,17 +36,10 @@ if __name__ == "__main__":
     ]  # label_names'
     windows = range(14)
     rolling_windows = [
-        1,
-        2,
         3,
-        4,
-        5,
         6,
-        7,
-        8,
         9,
-        10,
-        14,
+        12,
         24,
         36,
         52,
@@ -71,29 +64,37 @@ if __name__ == "__main__":
 
     fields_names = list(map(lambda x, y: (x, y), fields, names))
     labels_names = list(map(lambda x, y: (x, y), labels, label_names))
-
-    start_time = "2019-01-01 00:00:00"
+    
+    def date_range(start, end, intv):
+        from datetime import datetime
+        
+        
+        diff = (end  - start ) / intv
+        for i in range(intv):
+            yield (start + diff * i).strftime("%Y-%m-%d")
+        yield end.strftime("%Y-%m-%d")
+    start_time = "2019-01-02 00:00:00"
     #start_time = "2022-11-28 00:00:00"
     end_time = "2022-12-01 00:00:00"
 
-    start_time_ = (dateparser.parse(start_time) - timedelta(minutes=1)).strftime(
-        "%Y-%m-%d %H:%M:%S"
-    )
-    end_time_ = (dateparser.parse(end_time) + timedelta(minutes=1)).strftime(
-        "%Y-%m-%d %H:%M:%S"
-    )
+    
+    start_time_ = (dateparser.parse(start_time) - timedelta(minutes=1))
+    end_time_ = (dateparser.parse(end_time) + timedelta(minutes=1))
     if not os.path.exists(os.path.join(WORKING_DIR, "hdf")):
         os.mkdir(os.path.join(WORKING_DIR, "hdf"))
+    dates = date_range(start_time_,end_time_,8)
+    dates = [x for x in dates]
+    dates = [[dates[x],dates[x+1]] for x in range(len(dates)-1)]
     df = loadData(
         start_time=start_time_,
         end_time=end_time_,
         data_dir=os.path.join(WORKING_DIR, "hdf/dataset.h5"),
     )
     df_x = procData(
-        df, fields_names, nproc=nproc, start_time=start_time, end_time=end_time
+        df, fields_names, nproc=nproc, dates=dates
     )
     df_y = procData(
-        df, labels_names, nproc=nproc, start_time=start_time, end_time=end_time,label=True
+        df, labels_names, nproc=nproc, dates=dates,label=True
     )
     teststationarity = False
     if teststationarity:

@@ -64,19 +64,40 @@ def cache(name: str, df=None) -> str:
     cachedir = os.path.join(WORKING_DIR, "cache")
     if df is None:
         if name.split(".")[-1] == "parquet":
-            df = pd.read_parquet(os.path.join(cachedir, name))
+            try:
+                df = pd.read_parquet(os.path.join(cachedir, name))
+            except:
+                df = dd.read_parquet(os.path.join(cachedir, name.split(".")[0] + "_parquet"))
+            if isinstance(df, dd.DataFrame):
+                df = df.compute()
+        
+            
         else:
-            with open(os.path.join(cachedir, name), "rb") as f:
-                df = pkl.load(f)
+            try:
+                with open(os.path.join(cachedir, name), "rb") as f:
+                    df = pkl.load(f)
+            except:
+                df = dd.read_parquet(os.path.join(cachedir, name.split(".")[0]))
+                if isinstance(df, dd.DataFrame):
+                    df = df.compute()
             # df = dd.read_parquet(name)
         return df
     else:
         if isinstance(df, pd.DataFrame):
             name = name.split(".")[0] + ".parquet"
             df.to_parquet(os.path.join(cachedir, name))
+            del df
+        elif isinstance(df, dd.DataFrame):
+            name = name.split(".")[0] + "_parquet"
+            try:
+                df.to_parquet(os.path.join(cachedir, name),append=True)
+            except:
+                df.to_parquet(os.path.join(cachedir, name))
+            del df
         else:
             with open(os.path.join(cachedir, name), "wb") as f:
                 pkl.dump(df, f)
+            del df
         return name
 
 
