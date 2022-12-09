@@ -1,0 +1,1 @@
+WORKING_DIR = "F:/binance_data"
