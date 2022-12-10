@@ -19,7 +19,7 @@ if __name__ == "__main__":
     if not os.path.exists(WORKING_DIR):
         os.mkdir(WORKING_DIR)
     client = Client()
-    nproc = 7
+    nproc = -4
     set(scheduler="distributed", num_workers=nproc)
     labels = [
         "Ref($close, -1)/$close - 1",
@@ -98,7 +98,7 @@ if __name__ == "__main__":
         cache("symbols", symbols)
     memusage = df.memory_usage().sum().compute()*len(fields_names)/len(symbols)
     total_memory = psutil.virtual_memory().total
-    memuseperdf = math.ceil((memusage*nproc*2)/total_memory)
+    memuseperdf = math.ceil(((memusage))/total_memory)
     
     dates = date_range(start_time_,end_time_,memuseperdf)
     dates = [x for x in dates]

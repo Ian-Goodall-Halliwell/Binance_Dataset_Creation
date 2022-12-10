@@ -23,7 +23,7 @@ def procfunc(lep, df, field: List[str], scores, symbol, substart, end_time,start
     start_time = start_time.strftime('%Y-%m-%d %H:%M:%S')
     out = out.rename(field[1])
     out = out.loc[start_time:]
-    out = dd.from_pandas(out,chunksize=4000000)
+    #out = dd.from_pandas(out,npartitions=1)
     #print(f"done field: {field[1]}")
     #gc.collect()
     return out
@@ -156,54 +156,54 @@ def procData(df, fieldlist, nproc, dates ,label=False,symbols=None):
         }
     )
     scores = {}
-    with tqdm(desc="Processing data",total=(len(dates)*len(symbols))) as pbar:
-        
-        for start_time, end_time in dates:
-            substart = (dateparser.parse(start_time) - timedelta(days=14)).strftime("%Y-%m-%d")
-            if nproc != 1:
-                with Parallel(n_jobs=nproc) as parallel:
-                    for symbol in symbols:
-
-                        subdf = df[df["$symbol"] == symbol].compute()
-
-                        results = parallel(
-                            delayed(procfunc)(
-                                lep, subdf, field, scores, symbol, substart, end_time,start_time
-                            )
-                            for field in fieldlist
-                        )
-                        
-                        del subdf
-                        results = dd.multi.concat(results,axis=1)
-                        
-                        #results = results.repartition(npartitions=1000)
-                        #results = pd.DataFrame(results).T
-                        #print(results.memory_usage_per_partition())
-                        if label == False:
-                            path = cache(f"{symbol}_cached.parquet", results)
-                        else:
-                            path = cache(f"{symbol}_label_cached.parquet", results)
-                        del results
-                        #gc.collect()
-                        scores.update({symbol: path})
-                        pbar.update(1)
-            else:
+    pbar=  tqdm(desc="Processing data",total=(len(dates)*len(symbols)))
+    
+    for start_time, end_time in dates:
+        substart = (dateparser.parse(start_time) - timedelta(days=1)).strftime("%Y-%m-%d")
+        if nproc != 1:
+            with Parallel(n_jobs=nproc,batch_size=10,timeout=999999) as parallel:
                 for symbol in symbols:
+
                     subdf = df[df["$symbol"] == symbol].compute()
-                    results = []
-                    for field in fieldlist:
-                        results.append(
-                            procfunc(lep, subdf, field, scores, symbol, substart, end_time)
+
+                    results = parallel(
+                        delayed(procfunc)(
+                            lep, subdf, field, scores, symbol, substart, end_time,start_time
                         )
+                        for field in tqdm(fieldlist,desc=f"Calculating features for {symbol}", leave=False)
+                    )
+                    
                     del subdf
-                    results = pd.DataFrame(results).T
+                    results = pd.concat(results,axis=1)
+                    results = dd.from_pandas(results, chunksize=40000)
+                    #results = results.repartition(npartitions=1000)
+                    #results = pd.DataFrame(results).T
+                    #print(results.memory_usage_per_partition())
                     if label == False:
                         path = cache(f"{symbol}_cached.parquet", results)
                     else:
                         path = cache(f"{symbol}_label_cached.parquet", results)
-                    scores[symbol] = path
-                    #gc.collect()
                     del results
+                    #gc.collect()
+                    scores.update({symbol: path})
+                    pbar.update(1)
+        else:
+            for symbol in symbols:
+                subdf = df[df["$symbol"] == symbol].compute()
+                results = []
+                for field in fieldlist:
+                    results.append(
+                        procfunc(lep, subdf, field, scores, symbol, substart, end_time)
+                    )
+                del subdf
+                results = pd.DataFrame(results).T
+                if label == False:
+                    path = cache(f"{symbol}_cached.parquet", results)
+                else:
+                    path = cache(f"{symbol}_label_cached.parquet", results)
+                scores[symbol] = path
+                #gc.collect()
+                del results
     return scores
 
 
