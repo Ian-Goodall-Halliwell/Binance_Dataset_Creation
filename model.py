@@ -11,13 +11,16 @@ from subutils import cache, clearcache, loadData
 from utils import frac_diff, procData
 from workingdir import WORKING_DIR
 import pandas as pd
+import psutil
+import math
+
 if __name__ == "__main__":
     clearcache()
     if not os.path.exists(WORKING_DIR):
         os.mkdir(WORKING_DIR)
     client = Client()
     nproc = 7
-    set(scheduler="distributed", num_workers=nproc//2)
+    set(scheduler="distributed", num_workers=nproc)
     labels = [
         "Ref($close, -1)/$close - 1",
         "Ref($close, -5)/$close -1",
@@ -71,8 +74,8 @@ if __name__ == "__main__":
         
         diff = (end  - start ) / intv
         for i in range(intv):
-            yield (start + diff * i).strftime("%Y-%m-%d")
-        yield end.strftime("%Y-%m-%d")
+            yield (start + diff * i).strftime("%Y-%m-%d %H:%M:%S")
+        yield end.strftime("%Y-%m-%d %H:%M:%S")
     start_time = "2019-01-02 00:00:00"
     #start_time = "2022-11-28 00:00:00"
     end_time = "2022-12-01 00:00:00"
@@ -82,19 +85,30 @@ if __name__ == "__main__":
     end_time_ = (dateparser.parse(end_time) + timedelta(minutes=1))
     if not os.path.exists(os.path.join(WORKING_DIR, "hdf")):
         os.mkdir(os.path.join(WORKING_DIR, "hdf"))
-    dates = date_range(start_time_,end_time_,8)
-    dates = [x for x in dates]
-    dates = [[dates[x],dates[x+1]] for x in range(len(dates)-1)]
+    
     df = loadData(
         start_time=start_time_,
         end_time=end_time_,
         data_dir=os.path.join(WORKING_DIR, "hdf/dataset.h5"),
     )
+    try:
+        symbols = cache("symbols")
+    except:
+        symbols = df["$symbol"].compute().unique()
+        cache("symbols", symbols)
+    memusage = df.memory_usage().sum().compute()*len(fields_names)/len(symbols)
+    total_memory = psutil.virtual_memory().total
+    memuseperdf = math.ceil((memusage*nproc*2)/total_memory)
+    
+    dates = date_range(start_time_,end_time_,memuseperdf)
+    dates = [x for x in dates]
+    dates = [[dates[x],dates[x+1]] for x in range(len(dates)-1)]
+    
     df_x = procData(
-        df, fields_names, nproc=nproc, dates=dates
+        df, fields_names, nproc=nproc, dates=dates,symbols=symbols
     )
     df_y = procData(
-        df, labels_names, nproc=nproc, dates=dates,label=True
+        df, labels_names, nproc=nproc, dates=dates,label=True,symbols=symbols
     )
     teststationarity = False
     if teststationarity:

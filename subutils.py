@@ -89,10 +89,11 @@ def cache(name: str, df=None) -> str:
             del df
         elif isinstance(df, dd.DataFrame):
             name = name.split(".")[0] + "_parquet"
-            try:
-                df.to_parquet(os.path.join(cachedir, name),append=True)
-            except:
-                df.to_parquet(os.path.join(cachedir, name))
+            path = os.path.join(cachedir, name)
+            if os.path.exists(path):
+                df.to_parquet(os.path.join(cachedir, name),append=True,engine="fastparquet")
+            else:
+                df.to_parquet(os.path.join(cachedir, name),engine="fastparquet")
             del df
         else:
             with open(os.path.join(cachedir, name), "wb") as f:
