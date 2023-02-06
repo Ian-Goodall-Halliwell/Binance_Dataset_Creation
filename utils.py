@@ -13,11 +13,12 @@ from subutils import cache
 import dateparser
 from datetime import timedelta
 import gc
+from ta.volume import volume_weighted_average_price
 from tqdm.asyncio import tqdm
 def procfunc(lep, df, field: List[str], scores, symbol, substart, end_time,start_time):
 
     register_all_ops()
-
+    print(field[1])
     out = lep.expression(df, field=field[0], start_time=substart, end_time=end_time)
     start_time = dateparser.parse(start_time) + timedelta(minutes=1)
     start_time = start_time.strftime('%Y-%m-%d %H:%M:%S')
@@ -114,7 +115,7 @@ class LocalExpressionProvider(ExpressionProvider):
         except Exception as e:
             raise e
         try:
-            series = series.astype(np.float32)
+            series = series.astype(np.float64)
         except ValueError:
             pass
         except TypeError:
@@ -122,8 +123,10 @@ class LocalExpressionProvider(ExpressionProvider):
 
         series = series.loc[start_index:end_index]
         return series
-
-
+def fixvolume(df):
+    df["$volume"] = df["$volume"].rolling(11,win_type="hamming",min_periods=1).mean()
+    df["$volume"] = df["$volume"]*((df["$open"]+df["$close"]+df["$high"]+df["$low"])/4)
+    return df
 def procData(df, fieldlist, nproc, dates ,label=False,symbols=None):
 
     
@@ -133,6 +136,7 @@ def procData(df, fieldlist, nproc, dates ,label=False,symbols=None):
 
     except:
         btcdata = df[df["$symbol"] == "BTCBUSD"].compute()
+        #btcdata = fixvolume(btcdata)
         cache("BTCBUSD", btcdata)
         del btcdata
     try:
@@ -141,6 +145,7 @@ def procData(df, fieldlist, nproc, dates ,label=False,symbols=None):
 
     except:
         ethdata = df[df["$symbol"] == "ETHBUSD"].compute()
+        #ethdata = fixvolume(ethdata)
         cache("ETHBUSD", ethdata)
         del ethdata
     lep = LocalExpressionProvider()
@@ -157,15 +162,14 @@ def procData(df, fieldlist, nproc, dates ,label=False,symbols=None):
     )
     scores = {}
     pbar=  tqdm(desc="Processing data",total=(len(dates)*len(symbols)))
-    
+    en = 0
     for start_time, end_time in dates:
         substart = (dateparser.parse(start_time) - timedelta(days=1)).strftime("%Y-%m-%d")
         if nproc != 1:
-            with Parallel(n_jobs=nproc,batch_size=10,timeout=999999) as parallel:
+            with Parallel(n_jobs=nproc,batch_size=10,timeout=999999,backend="loky") as parallel:
                 for symbol in symbols:
-
                     subdf = df[df["$symbol"] == symbol].compute()
-
+                    #subdf = fixvolume(subdf)
                     results = parallel(
                         delayed(procfunc)(
                             lep, subdf, field, scores, symbol, substart, end_time,start_time
@@ -175,10 +179,8 @@ def procData(df, fieldlist, nproc, dates ,label=False,symbols=None):
                     
                     del subdf
                     results = pd.concat(results,axis=1)
-                    results = dd.from_pandas(results, chunksize=40000)
-                    #results = results.repartition(npartitions=1000)
-                    #results = pd.DataFrame(results).T
-                    #print(results.memory_usage_per_partition())
+                    #results = dd.from_pandas(results, chunksize=40000)
+
                     if label == False:
                         path = cache(f"{symbol}_cached.parquet", results)
                     else:
@@ -206,55 +208,6 @@ def procData(df, fieldlist, nproc, dates ,label=False,symbols=None):
                 del results
     return scores
 
-
-def get_weights_floored(num_k, d=0.5, floor=1e-3):
-    r"""Calculate weights ($w$) for each lag ($k$) through
-    $w_k = -w_{k-1} \frac{d - k + 1}{k}$ provided weight above a minimum value
-    (floor) for the weights to prevent computation of weights for the entire
-    time series.
-    Args:
-        d (int): differencing value.
-        num_k (int): number of lags (typically length of timeseries) to calculate w.
-        floor (float): minimum value for the weights for computational efficiency.
-    """
-    w_k = np.array([1])
-    k = 1
-    while k < num_k:
-        w_k_latest = -w_k[-1] * ((d - k + 1)) / k
-        if abs(w_k_latest) <= floor:
-            break
-        w_k = np.append(w_k, w_k_latest)
-        k += 1
-    w_k = w_k.reshape(-1, 1)
-    return w_k
-
-
-def frac_diff(df, d=0.5, floor=1e-3):
-    r"""Fractionally difference time series via CPU.
-    Args:
-        df (pd.DataFrame): dataframe of raw time series values.
-        d (float): differencing value from 0 to 1 where > 1 has no FD.
-        floor (float): minimum value of weights, ignoring anything smaller.
-    """
-    # Get weights window
-    weights = get_weights_floored(d=d, num_k=len(df), floor=floor)
-    weights_window_size = len(weights)
-    # Reverse weights
-    weights = weights[::-1]
-    # Blank fractionally differenced series to be filled
-    df_fd = []
-    # Slide window of time series, to calculated fractionally differenced values
-    # per window
-    for idx in range(weights_window_size, df.shape[0]):
-        # Dot product of weights and original values
-        # to get fractionally differenced values
-        date_idx = df.index[idx]
-        df_fd.append(np.dot(weights.T, df.iloc[idx - weights_window_size : idx]).item())
-    # Return FD values and weights
-    df_fd = pd.DataFrame(df_fd)
-    return df_fd, weights
-
-
 def compiledata(path):
     try:
         os.remove(os.path.join(path, "dataset.h5"))
@@ -273,9 +226,13 @@ def compiledata(path):
                 "VWAP": "$vwap",
             }
         )
+        ds = fixvolume(ds)
+        ds['$VWAP'] = volume_weighted_average_price(high=ds['$high'],low=ds["$low"],close=ds["$close"],volume=ds["$volume"],window=1440)
+       
         ds["$adj"] = ds.apply(priceadj, axis=1)
         ds = dd.from_pandas(ds, chunksize=100000)
         ds = ds.set_index("date")
+        ds.astype(np.float32)
         ds.to_hdf(
             os.path.join(path, "dataset.h5"),
             key=file.split(".")[0],
@@ -285,4 +242,4 @@ def compiledata(path):
 
 
 if __name__ == "__main__":
-    compiledata("F:/binancedata/")
+    compiledata("data")

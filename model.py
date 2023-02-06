@@ -3,66 +3,73 @@ from datetime import datetime, timedelta
 
 import dateparser
 import get_fields
-import numpy as np
+
 from dask.config import set
 from dask.distributed import Client
-from statsmodels.tsa.stattools import adfuller
+
 from subutils import cache, clearcache, loadData
-from utils import frac_diff, procData
+from utils import  procData
 from workingdir import WORKING_DIR
 import pandas as pd
+from preprocessing import nanfill, dist
+import numpy as np
 import psutil
 import math
+from pandarallel import pandarallel
+from tqdm import tqdm
 
 if __name__ == "__main__":
-    clearcache()
+    #clearcache()
     if not os.path.exists(WORKING_DIR):
-        os.mkdir(WORKING_DIR)
+       os.mkdir(WORKING_DIR)
     client = Client()
-    nproc = -4
+    nproc = -1
     set(scheduler="distributed", num_workers=nproc)
     labels = [
         "Ref($close, -1)/$close - 1",
         "Ref($close, -5)/$close -1",
         "Ref($close, -10)/$close -1",
         "Ref($close, -30)/$close -1",
+        "Ref($close, -60)/$close -1",
         "Ref($close, -360)/$close -1",
         "Ref($close, -1440)/$close -1",
+        "Ref($close, -10080)/$close -1",
+        "Ref($close, -20160)/$close -1",
+        "Ref($close, -40320)/$close -1",
     ]  # label
     label_names = [
         "LABEL1MIN",
         "LABEL5MIN",
         "LABEL10MIN",
         "LABEL30MIN",
+        "LABEL60MIN",
         "LABEL360MIN",
         "LABEL1440MIN",
+        "LABEL10080MIN",
+        "LABEL20160MIN",
+        "LABEL40320MIN",
     ]  # label_names'
-    windows = range(14)
+    
     rolling_windows = [
         3,
         6,
         9,
         12,
-        24,
-        36,
-        52,
-        72,
-        144,
+        30,
+        60,
+        180,
+        240,
         360,
         720,
         1440,
-        2160,
         2880,
         3600,
-        4320,
-        4760,
-        6200,
-        7640,
-        9080,
-        12400,
-        19600,
-        24800,
+        5760,
+        10080,
+        20160,
+        40320
     ]
+    windows = rolling_windows
     fields, names = get_fields.getfields(windows, rolling_windows)
 
     fields_names = list(map(lambda x, y: (x, y), fields, names))
@@ -76,9 +83,9 @@ if __name__ == "__main__":
         for i in range(intv):
             yield (start + diff * i).strftime("%Y-%m-%d %H:%M:%S")
         yield end.strftime("%Y-%m-%d %H:%M:%S")
-    start_time = "2019-01-02 00:00:00"
+    start_time = "2020-01-02 00:00:00"
     #start_time = "2022-11-28 00:00:00"
-    end_time = "2022-12-01 00:00:00"
+    end_time = "2023-01-14 00:00:00"
 
     
     start_time_ = (dateparser.parse(start_time) - timedelta(minutes=1))
@@ -91,11 +98,11 @@ if __name__ == "__main__":
         end_time=end_time_,
         data_dir=os.path.join(WORKING_DIR, "hdf/dataset.h5"),
     )
-    try:
-        symbols = cache("symbols")
-    except:
-        symbols = df["$symbol"].compute().unique()
-        cache("symbols", symbols)
+    dirs = os.listdir(os.path.join(WORKING_DIR,"cache"))
+    dirs = [x.split("_")[0] for x in dirs]
+    
+    symbols = df["$symbol"].compute().unique()
+    symbols = [x for x in symbols if x not in dirs]
     memusage = df.memory_usage().sum().compute()*len(fields_names)/len(symbols)
     total_memory = psutil.virtual_memory().total
     memuseperdf = math.ceil(((memusage))/total_memory)
@@ -110,34 +117,36 @@ if __name__ == "__main__":
     df_y = procData(
         df, labels_names, nproc=nproc, dates=dates,label=True,symbols=symbols
     )
-    teststationarity = False
-    if teststationarity:
-        adadict = df_x["ADABUSD"]
-        ada = cache(adadict)
-
-        for col in ada.columns:
-            mn = ada[col].mean()
-            if mn == np.nan:
-                mn = 0
-
-            c = ada[col].fillna(mn)
-            try:
-                ad = frac_diff(c)[0]
-                adfresults = adfuller(c)
-                if adfresults[1] > 0.05:
-                    print(col, adfresults[1])
-            except Exception as e:
-                print(e)
-
-    if not os.path.exists(os.path.join(WORKING_DIR, "full_data")):
-        os.mkdir(os.path.join(WORKING_DIR, "full_data"))
-    try:
-        os.remove(os.path.join(WORKING_DIR, "full_data/dset.h5"))
-    except:
-        pass
-    for key in df_x:
-        loaded_df = pd.concat({'X':cache(df_x[key]), 'y':cache(df_y[key])}, axis=1)
-
-        loaded_df.to_hdf(os.path.join(WORKING_DIR, "full_data/dset.h5"), key)
-
-    print("e")
+    kel = os.listdir('F:/binance_data/cache')
+    df_y_ = {x.split("_")[0]:x for x in kel if 'label' in x}
+    df_x = [x for x in kel if 'label' not in x]
+    df_x_ = {x.split("_")[0]:x for x in df_x if "cached" in x}
+    kel = [x for x in list(df_x_.keys())]
+    # if not os.path.exists(os.path.join(WORKING_DIR, "full_data")):
+    #     os.mkdir(os.path.join(WORKING_DIR, "full_data"))
+    # try:
+    #     os.remove(os.path.join(WORKING_DIR, "full_data/dset.h5"))
+    # except:
+    #     pass
+    pandarallel.initialize(nb_workers=4)
+    for key in tqdm(df_x_):
+        
+        df_y = cache(df_y_[key]).dropna(how="all")
+        loaded_df = cache(df_x_[key]).dropna(how="all")
+        if not df_y.empty or not loaded_df.empty:
+            df_y = df_y.parallel_apply(nanfill, axis=0)
+            loaded_df = loaded_df.parallel_apply(nanfill, axis=0)
+            df_y = df_y.parallel_apply(dist, axis=0).astype(np.float32)
+            loaded_df = loaded_df.parallel_apply(dist, axis=0).astype(np.float32)
+            loaded_df = pd.concat({"X": loaded_df, "y": df_y}, axis=1).astype(np.float32)
+            #loaded_df = dd.from_pandas(loaded_df,chunksize=40000)
+            import time
+            t = time.time()
+            loaded_df.to_hdf(os.path.join(WORKING_DIR, "full_data/dset.h5"), key,complevel=1,complib='blosc:zlib')
+            t -= time.time()
+            #print(t)
+        #os.remove(os.path.join(WORKING_DIR, f"cache/{df_x_[key]}"))
+        #os.remove(os.path.join(WORKING_DIR, f"cache/{df_y_[key]}"))
+        
+    #pp.run()
+    #print("e")

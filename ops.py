@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 from subutils import loadData
 from typing import Union, List, Type
-from scipy.stats import percentileofscore
+#from scipy.stats import percentileofscore
 
 from expressions import Expression, ExpressionOps
 
@@ -32,7 +32,24 @@ np.seterr(invalid="ignore")
 
 #################### Element-Wise Operator ####################
 
+def percentileofscore(a, score, kind='rank', nan_policy='propagate'):
+        
+        a = np.asarray(a)
+        n = a.size
+        score = np.asarray(score)
 
+    
+        # Prepare broadcasting
+        score = score[..., None]
+
+        def count(x):
+            return np.count_nonzero(x, -1)
+        left = count(a < score)
+        right = count(a <= score)
+        plus1 = left < right
+        perct = (left + right + plus1) * (50.0 / n)     
+        return perct
+        
 class Feature(Expression):
     """Static Expression
 
@@ -155,7 +172,7 @@ class Sign(NpElemOperator):
         """
         series = self.feature.load(instrument, start_index, end_index, freq)
         # TODO:  More precision types should be configurable
-        series = series.astype(np.float32)
+        series = series.astype(np.float64)
         return getattr(np, self.func)(series)
 
 
@@ -810,7 +827,7 @@ class Ref(Rolling):
         #npart = series.npartitions
         #series=series.compute()
         if self.N == 0:
-            series = pd.Series(series.iloc[0], index=series)
+            return series
         else:
             series = series.shift(self.N)  # copy
         
@@ -860,7 +877,7 @@ class RefBTC(Rolling):
             return series  # Pandas bug, see: https://github.com/pandas-dev/pandas/issues/21049
         if self.N == 0:
             #series = series.compute()
-            return pd.Series(series.iloc[0], index=series.index)
+            return series
         else:
             series = series.shift(self.N)  # copy
         return series
@@ -906,7 +923,7 @@ class RefETH(Rolling):
         if series.empty:
             return series  # Pandas bug, see: https://github.com/pandas-dev/pandas/issues/21049
         if self.N == 0:
-            return pd.Series(series.iloc[0], index=series.index)
+            return series
         else:
             series = series.shift(self.N)  # copy
         return series
@@ -1254,7 +1271,7 @@ class Rank(Rolling):
     def _load_internal(self, instrument, start_index, end_index, freq):
         series = self.feature.load(instrument, start_index, end_index, freq)
         # TODO: implement in Cython
-
+        #percentile = np.vectorize(percentileofscore,excluded='a')
         def rank(x):
             if np.isnan(x[-1]):
                 return np.nan
@@ -1513,7 +1530,9 @@ class Rsquare(Rolling):
             series = pd.Series(expanding_rsquare(_series.values), index=_series.index)
         else:
             series = pd.Series(rolling_rsquare(_series.values, self.N), index=_series.index)
+            
             series.loc[np.isclose(_series.rolling(self.N, min_periods=1).std(), 0, atol=2e-05)] = np.nan
+            series = series.fillna(0)
         return series
 
 
@@ -1823,10 +1842,21 @@ class Corr(PairRolling):
         # NOTE: Load uses MemCache, so calling load again will not cause performance degradation
         series_left = self.feature_left.load(instrument, start_index, end_index, freq)
         series_right = self.feature_right.load(instrument, start_index, end_index, freq)
+        if len(res) != len(series_right):
+            
+            series_right = series_right.reindex(res.index, method="ffill")
+        if len(res) != len(series_left):
+            
+            series_left = series_left.reindex(res.index, method="ffill")    
+        
+        
+        aset = np.isclose(series_left.rolling(self.N, min_periods=1).std(), 0, atol=2e-05)
+        bset = np.isclose(series_right.rolling(self.N, min_periods=1).std(), 0, atol=2e-05)
+        
         res.loc[
-            np.isclose(series_left.rolling(self.N, min_periods=1).std(), 0, atol=2e-05)
-            | np.isclose(series_right.rolling(self.N, min_periods=1).std(), 0, atol=2e-05)
-        ] = np.nan
+            #aset
+            bset
+        ] = 0
         return res
     
 class CorrBTC(PairRollingBTC):
@@ -1863,9 +1893,9 @@ class CorrBTC(PairRollingBTC):
         elif len(series_left) > len(series_right):
             series_left = series_left.reindex(index=series_right.index)
         res.loc[
-            np.isclose(series_left.rolling(self.N, min_periods=1).std(), 0, atol=2e-05)
-            | np.isclose(series_right.rolling(self.N, min_periods=1).std(), 0, atol=2e-05)
-        ] = np.nan
+            #np.isclose(series_left.rolling(self.N, min_periods=1).std(), 0, atol=2e-05)
+            np.isclose(series_right.rolling(self.N, min_periods=1).std(), 0, atol=2e-05)
+        ] = 0
         return res
 class CorrETH(PairRollingETH):
     """Rolling Correlation
@@ -1902,9 +1932,9 @@ class CorrETH(PairRollingETH):
             series_left = series_left.reindex(index=series_right.index)
         
         res.loc[
-            np.isclose(series_left.rolling(self.N, min_periods=1).std(), 0, atol=2e-05)
-            | np.isclose(series_right.rolling(self.N, min_periods=1).std(), 0, atol=2e-05)
-        ] = np.nan
+            #np.isclose(series_left.rolling(self.N, min_periods=1).std(), 0, atol=2e-05)
+            np.isclose(series_right.rolling(self.N, min_periods=1).std(), 0, atol=2e-05)
+        ] = 0
         return res
     
 class Cov(PairRolling):

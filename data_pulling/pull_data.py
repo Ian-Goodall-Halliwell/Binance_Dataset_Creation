@@ -102,30 +102,7 @@ def getstate(
         A list of tokens.
     """
     
-    t = False
-    if t:
-        return [
-            "BTCBUSD",
-            "ETHBUSD",
-            "BNBBUSD",
-            "ADABUSD",
-            "SOLBUSD",
-            "DOTBUSD",
-            "MATICBUSD",
-            "AVAXBUSD",
-            "TRXBUSD",
-            "NEARBUSD",
-            "ATOMBUSD",
-            "ALGOBUSD",
-            "VETBUSD",
-            "ICPBUSD",
-            "EOSBUSD",
-            "FTMBUSD",
-            "WAVESBUSD",
-            "OPBUSD",
-            "WAXPBUSD",
-        ]
-
+    
     currlist = []
     for ab in exchangeinfo["symbols"]:
         if (
@@ -139,19 +116,17 @@ def getstate(
             sm = client.get_klines(
                 symbol=ab["symbol"],
                 interval=Client.KLINE_INTERVAL_1DAY,
-                limit=4,
+                limit=10,
             )
-            try:
-                sm.pop(-1)
-                vol = [float(x[5]) for x in sm]
-                v = [float(x[4]) for x in sm]
-                vol = sum(vol) / len(vol)
-                v = sum(v) / len(v)
-            except Exception as e:
-                print(e)
-                continue
+            
+            sm.pop(-1)
+            vol = [float(x[5]) for x in sm]
+            v = [float(x[4]) for x in sm]
+            vol = sum(vol) / len(vol)
+            v = sum(v) / len(v)
+            
             vv = vol * v
-            if vv > 5000000:
+            if vv > 1000000:
                 currlist.append(ab["symbol"])
         if "DEFI" in ab["symbol"]:
             currlist.append(ab["symbol"])
@@ -230,8 +205,8 @@ def download1(
         dft = [
             [
                 int(x["T"]),
-                np.float16(x["p"]),
-                np.float16(x["q"]),
+                np.float32(x["p"]),
+                np.float32(x["q"]),
                 bool(x["m"]),
                 bool(x["M"]),
             ]
@@ -407,16 +382,16 @@ def get_acct(client):
 def run1m(d, clilist, trades=False):
     csv_path = "F:/binancedata/1m-raw"
     qlib_dir = "F:/binancedata/1m-qlib"
-    # if os.path.exists(csv_path):
-    #     shutil.rmtree(csv_path)
-    # os.mkdir(csv_path)
+    if os.path.exists(csv_path):
+        shutil.rmtree(csv_path)
+    os.mkdir(csv_path)
     dmin = d.strftime("%Y-%m-%d %H:%M:%S")
     strt = dateparser.parse("2019-01-01 00:00:00")
     strt = "2019-01-01 00:00:00"
     strt = date_to_milliseconds(strt)
     dmin = date_to_milliseconds(dmin)
-    # startdownload_1m(start=strt, end=dmin, dir=csv_path, clients=clilist, trades=trades)
-    # time.sleep(30)
+    startdownload_1m(start=strt, end=dmin, dir=csv_path, clients=clilist, trades=trades)
+    time.sleep(30)
     # checker.degunk("1m", d.strftime("%d %B, %Y, %H:%M:%S"))
     if os.path.exists(qlib_dir):
         shutil.rmtree(qlib_dir)
