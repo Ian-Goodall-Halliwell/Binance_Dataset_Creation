@@ -126,7 +126,7 @@ def getstate(
             v = sum(v) / len(v)
             
             vv = vol * v
-            if vv > 1000000:
+            if vv > 10000:
                 currlist.append(ab["symbol"])
         if "DEFI" in ab["symbol"]:
             currlist.append(ab["symbol"])
@@ -380,8 +380,8 @@ def get_acct(client):
 
 
 def run1m(d, clilist, trades=False):
-    csv_path = "F:/binancedata/1m-raw"
-    qlib_dir = "F:/binancedata/1m-qlib"
+    csv_path = "data/1m-raw"
+    qlib_dir = "data/1m-qlib"
     if os.path.exists(csv_path):
         shutil.rmtree(csv_path)
     os.mkdir(csv_path)
