@@ -17,7 +17,13 @@ from expressions import Expression, ExpressionOps
 
 from subutils import get_callable_kwargs,cache
 
-
+#import _libs
+import pyximport
+script_args = ["--cython-cplus"]
+setup_args = {
+    "script_args": script_args,
+}
+pyximport.install(setup_args=setup_args, language_level=3)
 try:
     from _libs.rolling import rolling_slope, rolling_rsquare, rolling_resi
     from _libs.expanding import expanding_slope, expanding_rsquare, expanding_resi
@@ -1857,6 +1863,13 @@ class Corr(PairRolling):
             #aset
             bset
         ] = 0
+        nas = res.isna().sum() / len(res) * 100
+        
+        if nas > 10:
+            print(bset)
+            print(series_left)
+            print(series_right)
+            exit()
         return res
     
 class CorrBTC(PairRollingBTC):

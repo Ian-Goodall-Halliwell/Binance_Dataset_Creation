@@ -101,6 +101,22 @@ def clean_data() -> None:
         counts = df.isna().sum().sort_values()
         print(counts)
         df.to_hdf(os.path.join(WORKING_DIR, "full_data/clean_data.h5"), col)
+# N = total # of rows to collate
+from itertools import chain
+def fast_flatten(input_list):
+    a=list(chain.from_iterable(input_list))
+    a += [False] * (N - len(a)) # collating logical arrays - missing values are replaced with False
+    return list(a)
+
+def combine_lists(frames):
+    COLUMN_NAMES = [frames[i].name for i in range(len(frames))]
+    COL_NAMES=COLUMN_NAMES
+    df_dict = dict.fromkeys(COL_NAMES, [])
+    for col in COL_NAMES:
+        extracted = (frame[col] for frame in frames)
+        df_dict[col] = fast_flatten(extracted)
+    Df_new = pd.DataFrame.from_dict(df_dict)[COL_NAMES]
+    return Df_new 
 def loadpkl(path) -> pd.DataFrame:
     """
     This function concatenates a list of dataframes into one dataframe.
@@ -117,9 +133,17 @@ def loadpkl(path) -> pd.DataFrame:
     for dfnm in dirs:
         subpth = os.path.join(path,dfnm)
         subls.append(subpth)
-  
-    df = pd.concat([pd.read_pickle(subpthd) for subpthd in subls], axis=0,join='outer')
-    return df
+    dfs = [pd.read_pickle(subpthd) for subpthd in subls]
+    del dfs[29]
+    #df = combine_lists(dfs)
+    dfvals = [dff.values.reshape(-1,1) for dff in dfs]
+    odf = pd.DataFrame(
+        np.concatenate(dfvals, axis=1),   
+        index=dfs[0].index, 
+        columns=[df.name for df in dfs]
+    )
+    #df = pd.concat(dfs, axis=1,join='outer')
+    return odf
     
 
 def bypickle(dfs: list) -> pd.DataFrame:
@@ -193,52 +217,55 @@ if __name__ == "__main__":
         df = pd.concat(df, axis=1,join="outer")
         df.to_pickle(os.path.join(WORKING_DIR, "full_data/tempset.pkl"))
     #df = df.T
+    # df = loadpkl(os.path.join(WORKING_DIR, "concatcache"))
+    # df.to_pickle(os.path.join(WORKING_DIR, "df_clean.pkl"))
+    # if os.path.exists(os.path.join(WORKING_DIR, "df_clean.pkl")):
+    #     df = pd.read_pickle(os.path.join(WORKING_DIR, "df_clean.pkl"))
+    # else:
+    dfs = []
+    dfdict = pd.DataFrame(index=df.index)
+    colvold = df.columns[0].split("_")[0]
+    for col in tqdm(df.columns):
+        colv = col.split("_")[0]
+        if colvold != colv:
+            dfdict = dfdict[-500000:]
+            dfdict = dfdict.stack(dropna=False)
+            dfdict.name = colvold
+            dfdict = dfdict.reset_index(level=1,drop=True)
+            #dfdict = pd.concat([dfdict, intermframe], axis=1,join='outer')
+            dfdict.to_pickle(os.path.join(WORKING_DIR, "concatcache",f"{colvold}.pkl"))
+            dfdict = pd.DataFrame(index=df.index)
+            #intermframe =pd.DataFrame()
+            colvold = colv
+        #dfs.append(df[col])
+        dfdict = pd.concat([dfdict,df[col]],axis=1,join='outer')
+                
     df = loadpkl(os.path.join(WORKING_DIR, "concatcache"))
     df.to_pickle(os.path.join(WORKING_DIR, "df_clean.pkl"))
-    if os.path.exists(os.path.join(WORKING_DIR, "df_clean.pkl")):
-        df = loadpkl(os.path.join(WORKING_DIR, "concatcache"))
-    else:
-        dfdict = pd.DataFrame(index=df.index)
-        colvold = df.columns[0].split("_")[0]
-        for col in tqdm(df.columns):
-            colv = col.split("_")[0]
-            if colvold != colv:
-                
-                dfdict = dfdict.stack()
-                dfdict.name = colvold
-                #dfdict = pd.concat([dfdict, intermframe], axis=1,join='outer')
-                dfdict.to_pickle(os.path.join(WORKING_DIR, "concatcache",f"{colv}.pkl"))
-                dfdict = pd.DataFrame(index=df.index)
-                #intermframe =pd.DataFrame()
-                colvold = colv
-            
-            dfdict = pd.concat([dfdict,df[col]],axis=1,join='outer')
-                  
-        df = loadpkl(os.path.join(WORKING_DIR, "concatcache"))
     df = df.dropna(how="all")
     df = df.drop(df.columns[df.isna().sum() > 0], axis=1)
     cols = df.columns
 
     df = StandardScaler().fit_transform(df).T
-    output = df.T
+    #df = df.T
     model = PCA()
     model.fit(df)
     ev = model.explained_variance_
     kval = len([x for x in ev if x > 1])
     print(kval)
-    #kval = 10
+    kval = 10
     model = PCA(n_components=kval)
     # rot = Rotator()
     model.fit(df)
     output = model.transform(df)
-
-    limit = int((output.shape[0] // 2) ** 0.5)
+    #output = df
+    limit = int((output.shape[1] // 2) ** 0.5)
     # determining number of clusters
     # using silhouette score method
     output = pd.DataFrame(output).ffill().bfill().values
     scores = []
-    for k in range(2, limit * 4):
-        model = MiniBatchKMeans(n_clusters=k)
+    for k in range(2, limit * 8):
+        model = MiniBatchKMeans(n_clusters=k,n_init='auto')
         model.fit(output)
         pred = model.predict(output)
         score = silhouette_score(output, pred)

@@ -18,7 +18,7 @@ from tqdm.asyncio import tqdm
 def procfunc(lep, df, field: List[str], scores, symbol, substart, end_time,start_time):
 
     register_all_ops()
-    print(field[1])
+    #print(field[1])
     out = lep.expression(df, field=field[0], start_time=substart, end_time=end_time)
     start_time = dateparser.parse(start_time) + timedelta(minutes=1)
     start_time = start_time.strftime('%Y-%m-%d %H:%M:%S')
@@ -127,6 +127,30 @@ def fixvolume(df):
     df["$volume"] = df["$volume"].rolling(11,win_type="hamming",min_periods=1).mean()
     df["$volume"] = df["$volume"]*((df["$open"]+df["$close"]+df["$high"]+df["$low"])/4)
     return df
+def ppfc(df,symbol,lep,scores,substart,end_time,start_time,fieldlist,label):
+    subdf = df[df["$symbol"] == symbol].compute()
+    #subdf = fixvolume(subdf)
+    results = []
+    for field in tqdm(fieldlist):
+
+        results.append(procfunc(
+                lep, subdf, field, scores, symbol, substart, end_time,start_time
+            ))
+        
+    
+    
+    del subdf
+    results = pd.concat(results,axis=1)
+    #results = dd.from_pandas(results, chunksize=40000)
+
+    if label == False:
+        path = cache(f"{symbol}_cached.parquet", results)
+    else:
+        path = cache(f"{symbol}_label_cached.parquet", results)
+    del results
+    #gc.collect()
+    scores.update({symbol: path})
+    
 def procData(df, fieldlist, nproc, dates ,label=False,symbols=None):
 
     
@@ -136,6 +160,7 @@ def procData(df, fieldlist, nproc, dates ,label=False,symbols=None):
 
     except:
         btcdata = df[df["$symbol"] == "BTCBUSD"].compute()
+        btcdata = df.compute()
         #btcdata = fixvolume(btcdata)
         cache("BTCBUSD", btcdata)
         del btcdata
@@ -166,29 +191,15 @@ def procData(df, fieldlist, nproc, dates ,label=False,symbols=None):
     for start_time, end_time in dates:
         substart = (dateparser.parse(start_time) - timedelta(days=1)).strftime("%Y-%m-%d")
         if nproc != 1:
-            with Parallel(n_jobs=nproc,batch_size=10,timeout=999999,backend="loky") as parallel:
-                for symbol in symbols:
-                    subdf = df[df["$symbol"] == symbol].compute()
-                    #subdf = fixvolume(subdf)
-                    results = parallel(
-                        delayed(procfunc)(
-                            lep, subdf, field, scores, symbol, substart, end_time,start_time
-                        )
-                        for field in tqdm(fieldlist,desc=f"Calculating features for {symbol}", leave=False)
+            with Parallel(n_jobs=nproc,timeout=999999,backend="loky") as parallel:
+                results = parallel(
+                    delayed(ppfc)(
+                        df,symbol,lep, scores, substart, end_time,start_time,fieldlist,label
                     )
-                    
-                    del subdf
-                    results = pd.concat(results,axis=1)
-                    #results = dd.from_pandas(results, chunksize=40000)
-
-                    if label == False:
-                        path = cache(f"{symbol}_cached.parquet", results)
-                    else:
-                        path = cache(f"{symbol}_label_cached.parquet", results)
-                    del results
-                    #gc.collect()
-                    scores.update({symbol: path})
-                    pbar.update(1)
+                    for symbol in symbols
+                )
+                
+            pbar.update(1)        
         else:
             for symbol in symbols:
                 subdf = df[df["$symbol"] == symbol].compute()

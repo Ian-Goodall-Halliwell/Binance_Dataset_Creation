@@ -19,11 +19,12 @@ from pandarallel import pandarallel
 from tqdm import tqdm
 
 if __name__ == "__main__":
-    #clearcache()
+   
+    clearcache()
     if not os.path.exists(WORKING_DIR):
        os.mkdir(WORKING_DIR)
     client = Client()
-    nproc = -3
+    nproc = 2
     set(scheduler="distributed", num_workers=nproc)
     labels = [
         "Ref($close, -1)/$close - 1",
@@ -52,14 +53,18 @@ if __name__ == "__main__":
     
     rolling_windows = [
         3,
+        5,
         6,
         9,
         12,
+        15,
         30,
         60,
+        120,
         180,
         240,
         360,
+        480,
         720,
         1440,
         2880,
@@ -85,7 +90,7 @@ if __name__ == "__main__":
         yield end.strftime("%Y-%m-%d %H:%M:%S")
     start_time = "2020-01-02 00:00:00"
     #start_time = "2022-11-28 00:00:00"
-    end_time = "2023-01-14 00:00:00"
+    end_time = "2023-02-06 00:00:00"
 
     
     start_time_ = (dateparser.parse(start_time) - timedelta(minutes=1))
@@ -117,33 +122,37 @@ if __name__ == "__main__":
     df_y = procData(
         df, labels_names, nproc=nproc, dates=dates,label=True,symbols=symbols
     )
-    kel = os.listdir('F:/binance_data/cache')
+    kel = os.listdir(os.path.join(WORKING_DIR,'cache'))
     df_y_ = {x.split("_")[0]:x for x in kel if 'label' in x}
     df_x = [x for x in kel if 'label' not in x]
     df_x_ = {x.split("_")[0]:x for x in df_x if "cached" in x}
     kel = [x for x in list(df_x_.keys())]
-    # if not os.path.exists(os.path.join(WORKING_DIR, "full_data")):
-    #     os.mkdir(os.path.join(WORKING_DIR, "full_data"))
-    # try:
-    #     os.remove(os.path.join(WORKING_DIR, "full_data/dset.h5"))
-    # except:
-    #     pass
-    pandarallel.initialize(nb_workers=4)
+    if not os.path.exists(os.path.join(WORKING_DIR, "full_data")):
+        os.mkdir(os.path.join(WORKING_DIR, "full_data"))
+    try:
+        os.remove(os.path.join(WORKING_DIR, "full_data/dset.h5"))
+    except:
+        pass
+    pandarallel.initialize(nb_workers=64)
+     
     for key in tqdm(df_x_):
         
         df_y = cache(df_y_[key]).dropna(how="all")
         loaded_df = cache(df_x_[key]).dropna(how="all")
         if not df_y.empty or not loaded_df.empty:
-            df_y = df_y.parallel_apply(nanfill, axis=0)
-            loaded_df = loaded_df.parallel_apply(nanfill, axis=0)
-            df_y = df_y.parallel_apply(dist, axis=0).astype(np.float32)
-            loaded_df = loaded_df.parallel_apply(dist, axis=0).astype(np.float32)
-            loaded_df = pd.concat({"X": loaded_df, "y": df_y}, axis=1).astype(np.float32)
-            #loaded_df = dd.from_pandas(loaded_df,chunksize=40000)
-            import time
-            t = time.time()
-            loaded_df.to_hdf(os.path.join(WORKING_DIR, "full_data/dset.h5"), key,complevel=1,complib='blosc:zlib')
-            t -= time.time()
+            try:
+                df_y = df_y.parallel_apply(nanfill, axis=0)
+                loaded_df = loaded_df.parallel_apply(nanfill, axis=0)
+                #df_y = df_y.parallel_apply(dist, axis=0).astype(np.float32)
+                loaded_df = loaded_df.parallel_apply(dist, axis=0).astype(np.float32)
+                loaded_df = pd.concat({"X": loaded_df, "y": df_y}, axis=1).astype(np.float32)
+                #loaded_df = dd.from_pandas(loaded_df,chunksize=40000)
+                import time
+                t = time.time()
+                loaded_df.to_hdf(os.path.join(WORKING_DIR, "full_data/dset.h5"), key,complevel=1,complib='blosc:zlib')
+                t -= time.time()
+            except:
+                pass
             #print(t)
         #os.remove(os.path.join(WORKING_DIR, f"cache/{df_x_[key]}"))
         #os.remove(os.path.join(WORKING_DIR, f"cache/{df_y_[key]}"))

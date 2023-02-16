@@ -33,8 +33,10 @@ def nanfill(df: pd.DataFrame) -> pd.DataFrame:
     df=df.ffill().bfill()
     nas = df.isna().sum() / len(df) * 100
     #print(df.name, nas)
-    # if nas > 0:
-    #     print(df.name, nas)
+    if nas > 0:
+        print(df.name, nas)
+        if nas > 95: 
+            df = df.fillna(0)
     df = df[int(40320*1):]
     return df
 
@@ -81,10 +83,10 @@ def dist(X: pd.Series) -> pd.Series:
     cdf = np.cumsum(evaled)
     cdf *= 1 / cdf.max()
     counts, bins = np.histogram(vals.reshape(-1, 1), bins=100)
-    scaledcdf = MinMaxScaler(feature_range=[0, max(counts)]).fit_transform(
+    scaledcdf = MinMaxScaler(feature_range=(0, max(counts),)).fit_transform(
         cdf.reshape(-1, 1)
     )
-    scaledkde_pdf = MinMaxScaler(feature_range=[0, max(counts)]).fit_transform(
+    scaledkde_pdf = MinMaxScaler(feature_range=(0, max(counts),)).fit_transform(
         evaled.reshape(-1, 1)
     )
     best = "kde"

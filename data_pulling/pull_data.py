@@ -116,7 +116,7 @@ def getstate(
             sm = client.get_klines(
                 symbol=ab["symbol"],
                 interval=Client.KLINE_INTERVAL_1DAY,
-                limit=10,
+                limit=100,
             )
             
             sm.pop(-1)
@@ -126,7 +126,7 @@ def getstate(
             v = sum(v) / len(v)
             
             vv = vol * v
-            if vv > 10000:
+            if vv > 1000000:
                 currlist.append(ab["symbol"])
         if "DEFI" in ab["symbol"]:
             currlist.append(ab["symbol"])
@@ -135,7 +135,7 @@ def getstate(
             #         if not "BEAR" in ab['symbol']:
             #             if not "BULL" in ab['symbol']:
             #                 currlist.append(ab['symbol'])
-    downloaded = os.listdir("F:/binancedata/1m-raw")
+    downloaded = os.listdir("data/1m-raw")
     downloaded = [x.split(".")[0] for x in downloaded]
     currlist = list(set(currlist).difference(downloaded))
     print("number of tokens:", len(currlist))
@@ -295,7 +295,7 @@ def startdownload_1m(start, end, dir, app=False, clients=[], trades=False):
         currlist = [
             popl.split(".")[0]
             for popl in os.listdir(
-                "C:/Users/Ian/Documents/Financial testing/data_pulling/data-download/1m-raw"
+                "data/1m-raw"
             )
             if popl.split(".")[0] != "CCI"
         ]
@@ -387,7 +387,7 @@ def run1m(d, clilist, trades=False):
     os.mkdir(csv_path)
     dmin = d.strftime("%Y-%m-%d %H:%M:%S")
     strt = dateparser.parse("2019-01-01 00:00:00")
-    strt = "2019-01-01 00:00:00"
+    strt = "2020-01-01 00:00:00"
     strt = date_to_milliseconds(strt)
     dmin = date_to_milliseconds(dmin)
     startdownload_1m(start=strt, end=dmin, dir=csv_path, clients=clilist, trades=trades)

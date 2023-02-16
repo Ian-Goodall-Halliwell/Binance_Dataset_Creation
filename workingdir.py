@@ -1,1 +1,1 @@
-WORKING_DIR = "F:/binance_data"
+WORKING_DIR = "/raid5/users/ian/Documents/GitHub/Binance_Dataset_Creation/data"
