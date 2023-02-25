@@ -24,7 +24,7 @@ if __name__ == "__main__":
     if not os.path.exists(WORKING_DIR):
        os.mkdir(WORKING_DIR)
     client = Client()
-    nproc = 4
+    nproc = 12
     set(scheduler="distributed", num_workers=nproc)
     labels = [
         "Ref($close, -1)/$close - 1",

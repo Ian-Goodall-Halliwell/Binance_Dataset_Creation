@@ -77,35 +77,38 @@ def dist(X: pd.Series) -> pd.Series:
         .flatten()
     )
     vals = outval[nval:].flatten()
-    kde = FFTKDE(bw="silverman").fit(vals)
-    blank = np.linspace(min(outval) - 1e-6, max(outval) + 1e-6, len(outval))
-    evaled = kde.evaluate(blank)
-    cdf = np.cumsum(evaled)
-    cdf *= 1 / cdf.max()
-    counts, bins = np.histogram(vals.reshape(-1, 1), bins=100)
-    scaledcdf = MinMaxScaler(feature_range=(0, max(counts),)).fit_transform(
-        cdf.reshape(-1, 1)
-    )
-    scaledkde_pdf = MinMaxScaler(feature_range=(0, max(counts),)).fit_transform(
-        evaled.reshape(-1, 1)
-    )
-    best = "kde"
-    cdf_b = np.vstack((blank, cdf))
+    kde = True
+    if kde:
+        kde = FFTKDE(bw="silverman").fit(vals)
+        blank = np.linspace(min(outval) - 1e-6, max(outval) + 1e-6, len(outval))
+        evaled = kde.evaluate(blank)
+        cdf = np.cumsum(evaled)
+        cdf *= 1 / cdf.max()
+        counts, bins = np.histogram(vals.reshape(-1, 1), bins=100)
+        scaledcdf = MinMaxScaler(feature_range=(0, max(counts),)).fit_transform(
+            cdf.reshape(-1, 1)
+        )
+        scaledkde_pdf = MinMaxScaler(feature_range=(0, max(counts),)).fit_transform(
+            evaled.reshape(-1, 1)
+        )
+        best = "kde"
+        cdf_b = np.vstack((blank, cdf))
 
-    def find_nearest(value, array=None):
-        cdfs = array[1, :]
-        array = array[0, :]
-        idx = np.searchsorted(array, value, side="left")
-        if idx > 0 and (
-            idx == len(array)
-            or math.fabs(value - array[idx - 1]) < math.fabs(value - array[idx])
-        ):
-            return cdfs[idx - 1]
-        else:
-            return cdfs[idx]
+        def find_nearest(value, array=None):
+            cdfs = array[1, :]
+            array = array[0, :]
+            idx = np.searchsorted(array, value, side="left")
+            if idx > 0 and (
+                idx == len(array)
+                or math.fabs(value - array[idx - 1]) < math.fabs(value - array[idx])
+            ):
+                return cdfs[idx - 1]
+            else:
+                return cdfs[idx]
 
-    vectorf = np.vectorize(find_nearest, excluded=["array"])(outval, array=cdf_b)
-    cdf = pd.Series(vectorf, index=X.index, name=X.name)
+        vectorf = np.vectorize(find_nearest, excluded=["array"])(outval, array=cdf_b)
+        cdf = pd.Series(vectorf, index=X.index, name=X.name)
+        return cdf.astype(np.float32)
     #print(best)
     if makefigs:
         plot = cdf.plot()
@@ -121,7 +124,7 @@ def dist(X: pd.Series) -> pd.Series:
         plt.ylim(0, max(counts))
         plt.savefig(f"{name}.png")
         plt.close()
-    return cdf.astype(np.float32)
+    return vals
 
 
 def run() -> None:
