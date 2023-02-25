@@ -134,7 +134,7 @@ def loadpkl(path) -> pd.DataFrame:
         subpth = os.path.join(path,dfnm)
         subls.append(subpth)
     dfs = [pd.read_pickle(subpthd) for subpthd in subls]
-    del dfs[29]
+    #del dfs[29]
     #df = combine_lists(dfs)
     dfvals = [dff.values.reshape(-1,1) for dff in dfs]
     odf = pd.DataFrame(
@@ -246,8 +246,8 @@ if __name__ == "__main__":
     df = df.drop(df.columns[df.isna().sum() > 0], axis=1)
     cols = df.columns
 
-    df = StandardScaler().fit_transform(df).T
-    #df = df.T
+    #df = StandardScaler().fit_transform(df).T
+    df = df.T
     model = PCA()
     model.fit(df)
     ev = model.explained_variance_

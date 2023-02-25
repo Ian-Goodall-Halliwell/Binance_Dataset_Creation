@@ -1865,11 +1865,11 @@ class Corr(PairRolling):
         ] = 0
         nas = res.isna().sum() / len(res) * 100
         
-        if nas > 10:
-            print(bset)
-            print(series_left)
-            print(series_right)
-            exit()
+        # if nas > 10:
+        #     print(bset)
+        #     print(series_left)
+        #     print(series_right)
+        #     exit()
         return res
     
 class CorrBTC(PairRollingBTC):
