@@ -20,11 +20,11 @@ from tqdm import tqdm
 
 if __name__ == "__main__":
    
-    clearcache()
+    #clearcache()
     if not os.path.exists(WORKING_DIR):
        os.mkdir(WORKING_DIR)
     client = Client()
-    nproc = 2
+    nproc = 4
     set(scheduler="distributed", num_workers=nproc)
     labels = [
         "Ref($close, -1)/$close - 1",
@@ -88,7 +88,7 @@ if __name__ == "__main__":
         for i in range(intv):
             yield (start + diff * i).strftime("%Y-%m-%d %H:%M:%S")
         yield end.strftime("%Y-%m-%d %H:%M:%S")
-    start_time = "2020-01-02 00:00:00"
+    start_time = "2021-01-02 00:00:00"
     #start_time = "2022-11-28 00:00:00"
     end_time = "2023-02-06 00:00:00"
 
@@ -108,20 +108,20 @@ if __name__ == "__main__":
     
     symbols = df["$symbol"].compute().unique()
     symbols = [x for x in symbols if x not in dirs]
-    memusage = df.memory_usage().sum().compute()*len(fields_names)/len(symbols)
-    total_memory = psutil.virtual_memory().total
-    memuseperdf = math.ceil(((memusage))/total_memory)
+    # memusage = df.memory_usage().sum().compute()*len(fields_names)/len(symbols)
+    # total_memory = psutil.virtual_memory().total
+    # memuseperdf = math.ceil(((memusage))/total_memory)
     
-    dates = date_range(start_time_,end_time_,memuseperdf)
-    dates = [x for x in dates]
-    dates = [[dates[x],dates[x+1]] for x in range(len(dates)-1)]
+    # dates = date_range(start_time_,end_time_,memuseperdf)
+    # dates = [x for x in dates]
+    # dates = [[dates[x],dates[x+1]] for x in range(len(dates)-1)]
     
-    df_x = procData(
-        df, fields_names, nproc=nproc, dates=dates,symbols=symbols
-    )
-    df_y = procData(
-        df, labels_names, nproc=nproc, dates=dates,label=True,symbols=symbols
-    )
+    # df_x = procData(
+    #     df, fields_names, nproc=nproc, dates=dates,symbols=symbols
+    # )
+    # df_y = procData(
+    #     df, labels_names, nproc=nproc, dates=dates,label=True,symbols=symbols
+    # )
     kel = os.listdir(os.path.join(WORKING_DIR,'cache'))
     df_y_ = {x.split("_")[0]:x for x in kel if 'label' in x}
     df_x = [x for x in kel if 'label' not in x]
@@ -133,7 +133,7 @@ if __name__ == "__main__":
         os.remove(os.path.join(WORKING_DIR, "full_data/dset.h5"))
     except:
         pass
-    pandarallel.initialize(nb_workers=64)
+    pandarallel.initialize(nb_workers=6)
      
     for key in tqdm(df_x_):
         

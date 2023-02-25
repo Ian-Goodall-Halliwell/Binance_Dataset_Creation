@@ -60,7 +60,7 @@ def dist(X: pd.Series) -> pd.Series:
     from scipy import stats
     from sklearn.preprocessing import MinMaxScaler, QuantileTransformer
 
-    makefigs = False
+    makefigs = True
     nval = -144000
     name = f"figures_hist/{X.name}"
     X = X.diff().fillna(X.mean())

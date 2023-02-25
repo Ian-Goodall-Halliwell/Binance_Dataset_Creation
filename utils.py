@@ -160,7 +160,7 @@ def procData(df, fieldlist, nproc, dates ,label=False,symbols=None):
 
     except:
         btcdata = df[df["$symbol"] == "BTCBUSD"].compute()
-        btcdata = df.compute()
+        #btcdata = df.compute()
         #btcdata = fixvolume(btcdata)
         cache("BTCBUSD", btcdata)
         del btcdata
