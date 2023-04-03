@@ -12,11 +12,12 @@ from sklearn.metrics import silhouette_score
 from tqdm import tqdm
 from workingdir import WORKING_DIR
 from scipy.cluster.hierarchy import dendrogram
-from sklearn.cluster import AgglomerativeClustering, MiniBatchKMeans
+from sklearn.cluster import AgglomerativeClustering, MiniBatchKMeans, DBSCAN,OPTICS, Birch,BisectingKMeans,SpectralClustering
 from sklearn.datasets import load_iris
 from ppca import PPCA
 from sklearn.decomposition import PCA, KernelPCA, SparsePCA
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler,RobustScaler,MinMaxScaler
+from sklearn.mixture import GaussianMixture
 np.random.seed(0)
 
 
@@ -228,75 +229,156 @@ if __name__ == "__main__":
     for col in tqdm(df.columns):
         colv = col.split("_")[0]
         if colvold != colv:
-            dfdict = dfdict[-500000:]
-            dfdict = dfdict.stack(dropna=False)
-            dfdict.name = colvold
-            dfdict = dfdict.reset_index(level=1,drop=True)
+            try:
+                dfdict = dfdict.stack(dropna=False)
+                dfdict.name = colvold
+                dfdict = dfdict.reset_index(level=1,drop=True)
+            except Exception as e:
+                print(e)
+                pass
+           # dfdict = dfdict.replace([np.inf], dfdict.loc[dfdict != np.inf].max())
+            #dfdict = dfdict.replace([-np.inf], dfdict.loc[dfdict != -np.inf].min())
             #dfdict = pd.concat([dfdict, intermframe], axis=1,join='outer')
             dfdict.to_pickle(os.path.join(WORKING_DIR, "concatcache",f"{colvold}.pkl"))
             dfdict = pd.DataFrame(index=df.index)
             #intermframe =pd.DataFrame()
             colvold = colv
         #dfs.append(df[col])
-        dfdict = pd.concat([dfdict,df[col]],axis=1,join='outer')
+        #df_ = pd.Series(MinMaxScaler().fit_transform(df[col][-110000:].values.reshape(-1, 1)).squeeze(),index=df[col][-110000:].index)
+        df_ = df[col][int(-525600//2):]
+        if not df_.isna().sum() > 0:
+            #df_ = pd.Series(StandardScaler(with_mean=False).fit_transform(df_.values.reshape(-1, 1)).squeeze(),index=df_.index)
+            df_  /= df_.std(axis=0)
+            df_ = df_.replace([np.inf], df_.loc[df_ != np.inf].max())
+            df_ = df_.replace([-np.inf], df_.loc[df_ != -np.inf].min())
+            
+        #dfdict = df_
+        dfdict = pd.concat([dfdict,df_],axis=1,join='outer')
+        #dfdict = df_
+        
                 
     df = loadpkl(os.path.join(WORKING_DIR, "concatcache"))
     df.to_pickle(os.path.join(WORKING_DIR, "df_clean.pkl"))
+    print(df.shape)
     df = df.dropna(how="all")
     df = df.drop(df.columns[df.isna().sum() > 0], axis=1)
-    cols = df.columns
+    print(df.shape)
+    names = df.columns
+    variation = df.values.T
+    from sklearn import covariance
 
-    #df = StandardScaler().fit_transform(df).T
-    df = df.T
-    model = PCA()
-    model.fit(df)
-    ev = model.explained_variance_
-    kval = len([x for x in ev if x > 1])
-    print(kval)
-    kval = 10
-    model = PCA(n_components=kval)
-    # rot = Rotator()
-    model.fit(df)
-    output = model.transform(df)
-    #output = df
-    limit = int((output.shape[1] // 2) ** 0.5)
-    # determining number of clusters
-    # using silhouette score method
-    output = pd.DataFrame(output).ffill().bfill().values
-    scores = []
-    for k in range(2, limit * 8):
-        model = MiniBatchKMeans(n_clusters=k,n_init='auto')
-        model.fit(output)
-        pred = model.predict(output)
-        score = silhouette_score(output, pred)
-        scores.append(score)
-    print(scores)
-    max_value = max(scores)
-    index = scores.index(max_value) + 1
-    model = MiniBatchKMeans(n_clusters=index)
-    model.fit(output)
-    pred = model.predict(output)
-    u_labels = np.unique(pred)
-    # plotting the results:
-    import shutil
+    #alphas = np.logspace(-100, 1, num=1000)
+    edge_model = covariance.GraphicalLassoCV()
 
-    if os.path.exists("clusters"):
-        shutil.rmtree("clusters")
-        os.mkdir("clusters")
-    else:
-        os.mkdir("clusters")
-    for en in range(output.shape[0] - 1):
-        for i in u_labels:
-            out = pred == i
-            out = out.flatten()
-            dx = output[:, en]
-            dx = dx[out]
-            dy = output[:, en + 1]
-            dy = dy[out]
-            plt.scatter(dx, dy, label=i)
-        plt.legend()
-        plt.savefig(f"clusters/clusters_{en}.png")
-        plt.close()
-    print("e")
-# dendrogram_2017 = sch.dendrogram(sch.linkage(data_2017_extracted_std, method='ward'))
-# plt.axhline(y=3.5, color='r', linestyle='--')
+    # standardize the time series: using correlations rather than covariance
+    # former is more efficient for structure recovery
+    X = variation.copy().T
+    #X /= X.std(axis=0)
+    edge_model.fit(X)
+    
+    
+    from sklearn import cluster
+
+    _, labels = cluster.affinity_propagation(edge_model.covariance_, random_state=0)
+    n_labels = labels.max()
+    labellist = {}
+    for i in range(n_labels + 1):
+        print(f"Cluster {i + 1}: {', '.join(names[labels == i])}")
+        labellist.update({i:names[labels == i]})
+    import pickle as pkl
+    with open("clusterlabels.pkl","wb") as fp:
+        pkl.dump(labellist,fp)
+        
+    from sklearn import manifold
+
+    node_position_model = manifold.LocallyLinearEmbedding(
+        n_components=2, eigen_solver="dense", n_neighbors=6
+    )
+
+    embedding = node_position_model.fit_transform(X.T).T
+    
+    import matplotlib.pyplot as plt
+    from matplotlib.collections import LineCollection
+
+    plt.figure(1, facecolor="w", figsize=(10, 8))
+    plt.clf()
+    ax = plt.axes([0.0, 0.0, 1.0, 1.0])
+    plt.axis("off")
+
+    # Plot the graph of partial correlations
+    partial_correlations = edge_model.precision_.copy()
+    d = 1 / np.sqrt(np.diag(partial_correlations))
+    partial_correlations *= d
+    partial_correlations *= d[:, np.newaxis]
+    non_zero = np.abs(np.triu(partial_correlations, k=1)) > 0.02
+
+    # Plot the nodes using the coordinates of our embedding
+    plt.scatter(
+        embedding[0], embedding[1], s=100 * d**2, c=labels, cmap=plt.cm.nipy_spectral
+    )
+
+    # Plot the edges
+    start_idx, end_idx = np.where(non_zero)
+    # a sequence of (*line0*, *line1*, *line2*), where::
+    #            linen = (x0, y0), (x1, y1), ... (xm, ym)
+    segments = [
+        [embedding[:, start], embedding[:, stop]] for start, stop in zip(start_idx, end_idx)
+    ]
+    values = np.abs(partial_correlations[non_zero])
+    lc = LineCollection(
+        segments, zorder=0, cmap=plt.cm.hot_r, norm=plt.Normalize(0, 0.7 * values.max())
+    )
+    lc.set_array(values)
+    lc.set_linewidths(15 * values)
+    ax.add_collection(lc)
+
+    # Add a label to each node. The challenge here is that we want to
+    # position the labels to avoid overlap with other labels
+    texts = []
+    for index, (name, label, (x, y)) in enumerate(zip(names, labels, embedding.T)):
+
+        dx = x - embedding[0]
+        dx[index] = 1
+        dy = y - embedding[1]
+        dy[index] = 1
+        this_dx = dx[np.argmin(np.abs(dy))]
+        this_dy = dy[np.argmin(np.abs(dx))]
+        if this_dx > 0:
+            horizontalalignment = "left"
+            x = x + 0.002
+        else:
+            horizontalalignment = "right"
+            x = x - 0.002
+        if this_dy > 0:
+            verticalalignment = "bottom"
+            y = y + 0.002
+        else:
+            verticalalignment = "top"
+            y = y - 0.002
+        from adjustText import adjust_text
+        texts.append(plt.text(
+            x,
+            y,
+            name,
+            size=10,
+            horizontalalignment=horizontalalignment,
+            verticalalignment=verticalalignment,
+            bbox=dict(
+                facecolor="w",
+                edgecolor=plt.cm.nipy_spectral(label / float(n_labels)),
+                alpha=0.6,
+            ),
+        ))
+    adjust_text(texts)    
+    plt.xlim(
+        embedding[0].min() - 0.15 * embedding[0].ptp(),
+        embedding[0].max() + 0.10 * embedding[0].ptp(),
+    )
+    plt.ylim(
+        embedding[1].min() - 0.03 * embedding[1].ptp(),
+        embedding[1].max() + 0.03 * embedding[1].ptp(),
+    )
+
+    plt.show()
+    plt.savefig("clustmap.png")
+    labellist = names[labels == i]

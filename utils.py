@@ -15,7 +15,12 @@ from datetime import timedelta
 import gc
 from ta.volume import volume_weighted_average_price
 from tqdm.asyncio import tqdm
-def procfunc(lep, df, field: List[str], scores, symbol, substart, end_time,start_time):
+# def procfunc(lep, df, field: List[str], scores, symbol, substart, end_time,start_time):
+
+    
+#     return out
+
+def procfuncold(lep, df, field: List[str], scores, symbol, substart, end_time,start_time):
 
     register_all_ops()
     #print(field[1])
@@ -28,7 +33,6 @@ def procfunc(lep, df, field: List[str], scores, symbol, substart, end_time,start
     #print(f"done field: {field[1]}")
     #gc.collect()
     return out
-
 
 def priceadj(row):
     return (row["$close"] + row["$low"] + row["$high"]) / 3
@@ -129,8 +133,38 @@ def fixvolume(df):
     return df
 def ppfc(df,symbol,lep,scores,substart,end_time,start_time,fieldlist,label):
     subdf = df[df["$symbol"] == symbol].compute()
+    # #subdf = fixvolume(subdf)
+    # import talib
+    # fs = talib.get_function_groups()
+    # results = []
+    
+    # for field in tqdm(fieldlist):
+
+    #     results.append(procfunc(
+    #             lep, subdf, field, scores, symbol, substart, end_time,start_time
+    #         ))
+        
+    
+    
+    # del subdf
+    # results = pd.concat(results,axis=1)
+    # #results = dd.from_pandas(results, chunksize=40000)
+    subdf = subdf.drop(['date'],axis=1)
+    if label == False:
+        path = cache(f"{symbol}_cached.parquet", subdf)
+    else:
+        path = cache(f"{symbol}_label_cached.parquet", subdf)
+    del subdf
+    #gc.collect()
+    scores.update({symbol: path})
+
+def ppfc_old(df,symbol,lep,scores,substart,end_time,start_time,fieldlist,label):
+    subdf = df[df["$symbol"] == symbol].compute()
     #subdf = fixvolume(subdf)
+    import talib
+    fs = talib.get_function_groups()
     results = []
+    
     for field in tqdm(fieldlist):
 
         results.append(procfunc(
@@ -150,46 +184,302 @@ def ppfc(df,symbol,lep,scores,substart,end_time,start_time,fieldlist,label):
     del results
     #gc.collect()
     scores.update({symbol: path})
-    
 def procData(df, fieldlist, nproc, dates ,label=False,symbols=None):
+    trynew= False
+    if trynew:
+        rolling_windows = [
+            3,
+            5,
+            6,
+            9,
+            12,
+            15,
+            30,
+            60,
+            120,
+            180,
+            240,
+            360,
+            480,
+            720,
+            1440,
+            2880,
+            3600,
+            5760,
+            10080,
+            20160,
+            40320
+        ]
+        from tuneta.tune_ta import TuneTA
+        tt = TuneTA(n_jobs=10, verbose=True)
+        X_train = df.compute().reset_index(drop=True)
+        multi = ((pd.to_datetime(x),y) for x,y in zip(X_train["date"].values, X_train["$symbol"].values))
+        multdex =  pd.MultiIndex.from_tuples(multi,names=["date","symbol"])
+        X_train.index = multdex
+        #X_train.index = pd.MultiIndex.from_tuples((pd.to_datetime(x),y) for x,y in zip(X_train["date"].values, X_train["$symbol"].values))
+        X_train["target"] = X_train["$close"].diff(periods=-60) / X_train["$close"] * 100
+        X_train = X_train.dropna(how="any")
+        y_train = X_train["target"]
+        X_train = X_train.drop(["target"],axis=1)
+        X_train = X_train.drop(["$symbol","$vwap"],axis=1)
+        X_train = X_train.rename(
+            columns={
+                "$open": "open",
+                "$high": "high",
+                "$low": "low",
+                "$close": "close",
+                "$volume": "volume",
+            }
+        )
+        # import talib
+        # fs = talib.get_function_groups()
+        tt.fit(X_train, y_train,
+            indicators=['tta'],
+            ranges=rolling_windows,
+            trials=100,
+            early_stop=100,
+            min_target_correlation=.02,
+        )
+        
+        # Show time duration in seconds per indicator
+        tt.fit_times()
 
-    
-    try:
-        btcdata = cache("BTCBUSD.parquet")
-        del btcdata
+        # Show correlation of indicators to target
+        tt.report(target_corr=True, features_corr=True)
 
-    except:
-        btcdata = df[df["$symbol"] == "BTCBUSD"].compute()
-        #btcdata = df.compute()
-        #btcdata = fixvolume(btcdata)
-        cache("BTCBUSD", btcdata)
-        del btcdata
-    try:
-        ethdata = cache("ETHBUSD.parquet")
-        del ethdata
+        # Select features with at most x correlation between each other
+        tt.prune(max_inter_correlation=.7)
 
-    except:
-        ethdata = df[df["$symbol"] == "ETHBUSD"].compute()
-        #ethdata = fixvolume(ethdata)
-        cache("ETHBUSD", ethdata)
-        del ethdata
+        # Show correlation of indicators to target and among themselves
+        tt.report(target_corr=True, features_corr=True)
+
+        # Add indicators to X_train
+        features = tt.transform(X_train)
+        X_train = pd.concat([X_train, features], axis=1)
+
+        # Add same indicators to X_test
+        features = tt.transform(X_test)
+        X_test = pd.concat([X_test, features], axis=1)
+    # try:
+    #     btcdata = cache("BTCBUSD.parquet")
+    #     del btcdata
+
+    # except:
+    #     btcdata = df[df["$symbol"] == "BTCBUSD"].compute()
+    #     #btcdata = df.compute()
+    #     #btcdata = fixvolume(btcdata)
+    #     cache("BTCBUSD", btcdata)
+    #     del btcdata
+    # try:
+    #     ethdata = cache("ETHBUSD.parquet")
+    #     del ethdata
+
+    # except:
+    #     ethdata = df[df["$symbol"] == "ETHBUSD"].compute()
+    #     #ethdata = fixvolume(ethdata)
+    #     cache("ETHBUSD", ethdata)
+    #     del ethdata
     lep = LocalExpressionProvider()
-    df = df.astype(
-        {
-            "$close": "float32",
-            "$high": "float32",
-            "$low": "float32",
-            "$open": "float32",
-            "$volume": "float32",
-            "$vwap": "float32",
-            "$adj": "float32",
-        }
-    )
+    # df = df.astype(
+    #     {
+    #         "$close": "float32",
+    #         "$high": "float32",
+    #         "$low": "float32",
+    #         "$open": "float32",
+    #         "$volume": "float32",
+    #         "$vwap": "float32",
+    #         "$adj": "float32",
+    #     }
+    # )
     scores = {}
     pbar=  tqdm(desc="Processing data",total=(len(dates)*len(symbols)))
     en = 0
     for start_time, end_time in dates:
-        substart = (dateparser.parse(start_time) - timedelta(days=1)).strftime("%Y-%m-%d")
+        substart = (dateparser.parse(start_time) - timedelta(minutes=40330)).strftime("%Y-%m-%d")
+        if nproc != 1:
+            with Parallel(n_jobs=nproc,timeout=999999,backend="multiprocessing") as parallel:
+                results = parallel(
+                    delayed(ppfc)(
+                        df,symbol,lep, scores, substart, end_time,start_time,fieldlist,label
+                    )
+                    for symbol in symbols
+                )
+                
+            pbar.update(1)        
+        else:
+            for symbol in symbols:
+                subdf = df[df["$symbol"] == symbol].compute()
+                results = []
+                for field in fieldlist:
+                    results.append(
+                        procfunc(lep, subdf, field, scores, symbol, substart, end_time)
+                    )
+                del subdf
+                results = pd.DataFrame(results).T
+                if label == False:
+                    path = cache(f"{symbol}_cached.parquet", results)
+                else:
+                    path = cache(f"{symbol}_label_cached.parquet", results)
+                scores[symbol] = path
+                #gc.collect()
+                del results
+    return scores
+
+def compiledata(path,append=True):
+    if not append:
+        try:
+            os.remove(os.path.join(path, "dataset.h5"))
+        except:
+            pass
+    
+    for file in os.listdir(os.path.join(path, "1m-raw")):
+        if append:
+            
+            df = pd.read_hdf(
+                os.path.join(path, "dataset.h5"),
+                key=file.split(".")[0],
+                start=-1440
+            )
+            store = pd.HDFStore(os.path.join(path, "dataset.h5"))
+            dfidx = df.index[-1440]
+            endidx = df.index[-1]
+            print('e')
+        ds = pd.read_csv(os.path.join(os.path.join(path, "1m-raw"), file))
+        ds = ds.set_index(pd.to_datetime(ds["date"]))
+        if append:
+            ds = ds[dfidx:]
+        ds = ds.rename(
+            columns={
+                "open": "$open",
+                "high": "$high",
+                "low": "$low",
+                "close": "$close",
+                "volume": "$volume",
+                "symbol": "$symbol",
+                "VWAP": "$vwap",
+            }
+        )
+        # ds = fixvolume(ds)
+        # ds['$vwap'] = volume_weighted_average_price(high=ds['$high'],low=ds["$low"],close=ds["$close"],volume=ds["$volume"],window=1440)
+       
+        # ds["$adj"] = ds.apply(priceadj, axis=1)
+        #ds = dd.from_pandas(ds, chunksize=100000)
+        
+        ds.astype(
+        {
+            "date": "datetime64[ns]",
+            "$open": "float32",
+            "$high": "float32",
+            "$low": "float32",
+            "$close": "float32",
+            "$volume": "float32",
+            "$symbol": "object",
+            "$vwap": "float32",
+        })
+        if append:
+            ds = ds[endidx + timedelta(minutes=1):]
+            #ds = pd.concat([df,ds],axis=0)
+            if not ds.empty:
+                store.append(file.split(".")[0],ds)
+            store.close()
+        else:
+            # print(ds.isna().sum())
+            ds.to_hdf(
+                os.path.join(path, "dataset.h5"),
+                key=file.split(".")[0],
+                mode="a",
+                format="table",
+            )
+
+
+def procDataold(df, fieldlist, nproc, dates ,label=False,symbols=None):
+    trynew= True
+    if trynew:
+        from tuneta.tune_ta import TuneTA
+        tt = TuneTA(n_jobs=8, verbose=True)
+        X_train = df.compute().reset_index(drop=True)
+        multi = ((pd.to_datetime(x),y) for x,y in zip(X_train["date"].values, X_train["$symbol"].values))
+        multdex =  pd.MultiIndex.from_tuples(multi,names=["date","symbol"])
+        X_train.index = multdex
+        X_train["target"] = X_train["$close"].diff(periods=-60) / X_train["$close"] * 100
+        X_train = X_train.dropna(how="any")
+        y_train = X_train["target"]
+        X_train = X_train.drop(["target"],axis=1)
+        X_train = X_train.drop(["$symbol","$vwap"],axis=1)
+        X_train = X_train.rename(
+            columns={
+                "$open": "open",
+                "$high": "high",
+                "$low": "low",
+                "$close": "close",
+                "$volume": "volume",
+            }
+        )
+        import talib
+        fs = talib.get_function_groups()
+        tt.fit(X_train, y_train,
+            indicators=['all'],
+            ranges=[(4, 30)],
+            trials=500,
+            early_stop=100,
+            min_target_correlation=.05,
+        )
+        
+        # Show time duration in seconds per indicator
+        tt.fit_times()
+
+        # Show correlation of indicators to target
+        tt.report(target_corr=True, features_corr=True)
+
+        # Select features with at most x correlation between each other
+        tt.prune(max_inter_correlation=.7)
+
+        # Show correlation of indicators to target and among themselves
+        tt.report(target_corr=True, features_corr=True)
+
+        # Add indicators to X_train
+        features = tt.transform(X_train)
+        X_train = pd.concat([X_train, features], axis=1)
+
+        # Add same indicators to X_test
+        features = tt.transform(X_test)
+        X_test = pd.concat([X_test, features], axis=1)
+    # try:
+    #     btcdata = cache("BTCBUSD.parquet")
+    #     del btcdata
+
+    # except:
+    #     btcdata = df[df["$symbol"] == "BTCBUSD"].compute()
+    #     #btcdata = df.compute()
+    #     #btcdata = fixvolume(btcdata)
+    #     cache("BTCBUSD", btcdata)
+    #     del btcdata
+    # try:
+    #     ethdata = cache("ETHBUSD.parquet")
+    #     del ethdata
+
+    # except:
+    #     ethdata = df[df["$symbol"] == "ETHBUSD"].compute()
+    #     #ethdata = fixvolume(ethdata)
+    #     cache("ETHBUSD", ethdata)
+    #     del ethdata
+    lep = LocalExpressionProvider()
+    # df = df.astype(
+    #     {
+    #         "$close": "float32",
+    #         "$high": "float32",
+    #         "$low": "float32",
+    #         "$open": "float32",
+    #         "$volume": "float32",
+    #         "$vwap": "float32",
+    #         "$adj": "float32",
+    #     }
+    # )
+    scores = {}
+    pbar=  tqdm(desc="Processing data",total=(len(dates)*len(symbols)))
+    en = 0
+    for start_time, end_time in dates:
+        substart = (dateparser.parse(start_time) - timedelta(minutes=40330)).strftime("%Y-%m-%d")
         if nproc != 1:
             with Parallel(n_jobs=nproc,timeout=999999,backend="loky") as parallel:
                 results = parallel(
@@ -218,39 +508,5 @@ def procData(df, fieldlist, nproc, dates ,label=False,symbols=None):
                 #gc.collect()
                 del results
     return scores
-
-def compiledata(path):
-    try:
-        os.remove(os.path.join(path, "dataset.h5"))
-    except:
-        pass
-    for file in os.listdir(os.path.join(path, "1m-raw")):
-        ds = pd.read_feather(os.path.join(os.path.join(path, "1m-raw"), file))
-        ds = ds.rename(
-            columns={
-                "open": "$open",
-                "high": "$high",
-                "low": "$low",
-                "close": "$close",
-                "volume": "$volume",
-                "symbol": "$symbol",
-                "VWAP": "$vwap",
-            }
-        )
-        ds = fixvolume(ds)
-        ds['$VWAP'] = volume_weighted_average_price(high=ds['$high'],low=ds["$low"],close=ds["$close"],volume=ds["$volume"],window=1440)
-       
-        ds["$adj"] = ds.apply(priceadj, axis=1)
-        ds = dd.from_pandas(ds, chunksize=100000)
-        ds = ds.set_index("date")
-        ds.astype(np.float32)
-        ds.to_hdf(
-            os.path.join(path, "dataset.h5"),
-            key=file.split(".")[0],
-            mode="a",
-            format="table",
-        )
-
-
 if __name__ == "__main__":
-    compiledata("data")
+    compiledata("data",append=False)

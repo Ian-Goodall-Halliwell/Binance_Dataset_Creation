@@ -31,7 +31,9 @@ def nanfill(df: pd.DataFrame) -> pd.DataFrame:
     df = df.interpolate(method="linear", limit_direction="forward")
     
     df=df.ffill().bfill()
+    
     nas = df.isna().sum() / len(df) * 100
+    
     #print(df.name, nas)
     if nas > 0:
         print(df.name, nas)
@@ -41,7 +43,7 @@ def nanfill(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def dist(X: pd.Series) -> pd.Series:
+def dist(X: pd.Series,app=False,key=None) -> pd.Series:
     """
     This function takes a pandas series and returns a pandas series.
 
@@ -55,29 +57,44 @@ def dist(X: pd.Series) -> pd.Series:
     import math
     import numpy as np
     import pandas as pd
-    from KDEpy.FFTKDE import FFTKDE
+    #from KDEpy.FFTKDE import FFTKDE
     from matplotlib import pyplot as plt
     from scipy import stats
     from sklearn.preprocessing import MinMaxScaler, QuantileTransformer
-
-    makefigs = True
+    import pickle as pkl
+    
+    makefigs = False
     nval = -144000
     name = f"figures_hist/{X.name}"
-    X = X.diff().fillna(X.mean())
+    #X = X.diff().fillna(X.mean())
+    X = X.fillna(X.mean())
     if makefigs:
         raw = X.hist(bins=100, label="Raw Data")
         plot_open = raw.get_figure()
         plot_open.savefig(f"figures_raw/{X.name}.png")
         plt.close(plot_open)
     outval = X.values.reshape(-1, 1)
-    outval = (
-        QuantileTransformer(n_quantiles=10000, output_distribution="normal")
-        .fit(outval[nval:].reshape(-1, 1))
-        .transform(outval.reshape(-1, 1))
-        .flatten()
-    )
-    vals = outval[nval:].flatten()
-    kde = True
+    if not app:
+        tmodel = QuantileTransformer(n_quantiles=10000, output_distribution="normal").fit(outval[nval:].reshape(-1, 1))
+        outval = (
+            
+            tmodel
+            .transform(outval.reshape(-1, 1))
+            .flatten()
+        )
+        with open(f"quantiletransformer_{key}.pkl","wb") as f:
+            pkl.dump(tmodel,f)
+    elif app:
+        with open(f"quantiletransformer_{key}.pkl","rb") as f:
+            tmodel = pkl.load(f)
+        outval = (
+            
+            tmodel
+            .transform(outval.reshape(-1, 1))
+            .flatten()
+        )
+    # vals = outval[nval:].flatten()
+    kde = False
     if kde:
         kde = FFTKDE(bw="silverman").fit(vals)
         blank = np.linspace(min(outval) - 1e-6, max(outval) + 1e-6, len(outval))
@@ -107,24 +124,28 @@ def dist(X: pd.Series) -> pd.Series:
                 return cdfs[idx]
 
         vectorf = np.vectorize(find_nearest, excluded=["array"])(outval, array=cdf_b)
-        cdf = pd.Series(vectorf, index=X.index, name=X.name)
-        return cdf.astype(np.float32)
+        outval = pd.Series(vectorf, index=X.index, name=X.name)
+        return outval.astype(np.float32)
     #print(best)
     if makefigs:
-        plot = cdf.plot()
+        outval = pd.Series(outval, index=X.index, name=X.name)
+        plot = outval.plot()
         plot_open = plot.get_figure()
         plot_open.savefig(f"figures/{X.name}.png")
-        plt.close(plot_open)
-        plt.plot(blank, scaledcdf)
-        plt.plot(blank, scaledkde_pdf)
-        valsmax = max(vals)
-        valsmin = min(vals)
-        plt.hist(vals.reshape(-1, 1), bins=100)
-        plt.xlim(valsmin, valsmax)
-        plt.ylim(0, max(counts))
-        plt.savefig(f"{name}.png")
+        try:
+            plt.close(plot_open)
+            plt.plot(blank, scaledcdf)
+            plt.plot(blank, scaledkde_pdf)
+            valsmax = max(vals)
+            valsmin = min(vals)
+            plt.hist(vals.reshape(-1, 1), bins=100)
+            plt.xlim(valsmin, valsmax)
+            plt.ylim(0, max(counts))
+            plt.savefig(f"{name}.png")
+        except:
+            pass
         plt.close()
-    return vals
+    return outval
 
 
 def run() -> None:

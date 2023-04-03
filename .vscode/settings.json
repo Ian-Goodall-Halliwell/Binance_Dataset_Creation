@@ -1,4 +1,8 @@
 {
     "editor.tabCompletion": "on",
-    "diffEditor.codeLens": true
+    "diffEditor.codeLens": true,
+    "files.associations": {
+        "utility": "cpp",
+        "memory": "cpp"
+    }
 }

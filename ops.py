@@ -19,15 +19,18 @@ from subutils import get_callable_kwargs,cache
 
 # import _libs
 import pyximport
-import pyximport; pyximport.install()
+
+#import pyarrow as pa
 script_args = ["--cython-cplus"]
-pyximport.install(setup_args={"script_args":script_args,
-                              "include_dirs":np.get_include()},
+setup_args={"script_args":script_args,"include_dirs":[np.get_include()]}
+
+
+pyximport.install(setup_args=setup_args,
                   
-                 language_level=4)
-setup_args = {
-    "script_args": script_args,
-}
+                 language_level=3)
+# setup_args = {
+#     "script_args": script_args,
+# }
 # pyximport.install(setup_args=setup_args, language_level=3)
 from _libs.rolling import rolling_slope, rolling_rsquare, rolling_resi
 from _libs.expanding import expanding_slope, expanding_rsquare, expanding_resi

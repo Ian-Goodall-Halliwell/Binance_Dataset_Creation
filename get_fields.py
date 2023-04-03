@@ -78,19 +78,21 @@ def getfields(windows,rolling_windows):
     # names += ["DELBTC%d" % d for d in windows]
     # fields += ["DeltaETH($close, %d)/RefETH($close,0)" % d for d in windows]
     # names += ["DELETH%d" % d for d in windows]
-    fields += ["Corr(RefBTC($close,0)/RefBTC($close,1), Log($volume/(Ref($volume, 1)+1e-12)+1), %d)" % (d) for d in windows]
-    names += ["CORRBTCV%d" % d for d in windows]
-    fields += ["Corr(RefETH($close,0)/RefETH($close,1), Log($volume/(Ref($volume, 1)+1e-12)+1), %d)" % (d) for d in windows]
-    names += ["CORRETHV%d" % d for d in windows]
-    fields += ["Corr(RefBTC($close,0)/RefBTC($close,1), $close/Ref($close, 1), %d)" % (d) for d in windows]
-    names += ["CORRBTC%d" % d for d in windows]
-    fields += ["Corr(RefETH($close,0)/RefETH($close,1), $close/Ref($close, 1), %d)" % (d) for d in windows]
-    names += ["CORRETH%d" % d for d in windows]
     
-    fields += ["Corr(Log(RefBTC($volume,0)/RefBTC($volume, 1)+1), Log($volume/(Ref($volume, 1)+1e-12)+1), %d)" % (d) for d in windows]
-    names += ["CORRBTCVV%d" % d for d in windows]
-    fields += ["Corr(Log(RefETH($volume,0)/RefETH($volume, 1)+1), Log($volume/(Ref($volume, 1)+1e-12)+1), %d)" % (d) for d in windows]
-    names += ["CORRETHVV%d" % d for d in windows]
+    
+    # fields += ["Corr(RefBTC($close,0)/RefBTC($close,1), Log($volume/(Ref($volume, 1)+1e-12)+1), %d)" % (d) for d in windows]
+    # names += ["CORRBTCV%d" % d for d in windows]
+    # fields += ["Corr(RefETH($close,0)/RefETH($close,1), Log($volume/(Ref($volume, 1)+1e-12)+1), %d)" % (d) for d in windows]
+    # names += ["CORRETHV%d" % d for d in windows]
+    # fields += ["Corr(RefBTC($close,0)/RefBTC($close,1), $close/Ref($close, 1), %d)" % (d) for d in windows]
+    # names += ["CORRBTC%d" % d for d in windows]
+    # fields += ["Corr(RefETH($close,0)/RefETH($close,1), $close/Ref($close, 1), %d)" % (d) for d in windows]
+    # names += ["CORRETH%d" % d for d in windows]
+    
+    # fields += ["Corr(Log(RefBTC($volume,0)/RefBTC($volume, 1)+1), Log($volume/(Ref($volume, 1)+1e-12)+1), %d)" % (d) for d in windows]
+    # names += ["CORRBTCVV%d" % d for d in windows]
+    # fields += ["Corr(Log(RefETH($volume,0)/RefETH($volume, 1)+1), Log($volume/(Ref($volume, 1)+1e-12)+1), %d)" % (d) for d in windows]
+    # names += ["CORRETHVV%d" % d for d in windows]
     
     fields += ["(Max($high, %d)/$high)" % d for d in windows]
     names += ["MAXGE%d" % d for d in windows]
@@ -298,10 +300,10 @@ def getfields(windows,rolling_windows):
     fields += ["Quantile($close, %d, 0.2)/$close" % d for d in windows]
     names += ["QTLD%d" % d for d in windows]
 
-    # Get the percentile of current close price in past d day's close price.
-    # Represent the current price level comparing to past N days, add additional information to moving average.
-    #fields += ["Rank($close, %d)" % d for d in windows]
-    #names += ["RANK%d" % d for d in windows]
+    # # Get the percentile of current close price in past d day's close price.
+    # # Represent the current price level comparing to past N days, add additional information to moving average.
+    # fields += ["Rank($close, %d)" % d for d in windows]
+    # names += ["RANK%d" % d for d in windows]
 
     # Represent the price position between upper and lower resistent price for past d days.
     fields += ["($close-Min($low, %d))/(Max($high, %d)-Min($low, %d)+1e-12)" % (d, d, d) for d in windows]

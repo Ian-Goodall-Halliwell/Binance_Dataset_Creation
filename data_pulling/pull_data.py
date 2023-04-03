@@ -15,7 +15,7 @@ from typing import List
 import pandas as pd
 from ta.volume import volume_weighted_average_price
 import numpy as np
-
+#from ..utils import compiledata
 # import dill as pickle
 
 try:
@@ -23,10 +23,7 @@ try:
 except:
     from data_pulling import checker
 s_print_lock = Lock()
-try:
-    from data_pulling import dump_bin
-except:
-    import dump_bin
+
 
 
 def call_api(func_to_call, client, clientlist, params, wait=False):
@@ -102,7 +99,11 @@ def getstate(
         A list of tokens.
     """
     
-    
+    store = pd.HDFStore(os.path.join("F:/binance_data", "hdf/dataset.h5"))
+    cols = store.keys()
+    store.close()
+    currlist = [x[1:] for x in cols]
+    return currlist
     currlist = []
     for ab in exchangeinfo["symbols"]:
         if (
@@ -126,7 +127,7 @@ def getstate(
             v = sum(v) / len(v)
             
             vv = vol * v
-            if vv > 1000000:
+            if vv > 40000000:
                 currlist.append(ab["symbol"])
         if "DEFI" in ab["symbol"]:
             currlist.append(ab["symbol"])
@@ -143,7 +144,7 @@ def getstate(
 
 
 def download1(
-    start: str, end: str, interval: str, q, path: str, type1: str, token, trade=False
+    start: str, end: str, interval: str, q, path: str, type1: str, token, trade=False,app=False,csvs=None
 ):
     """
     This function downloads the data from the binance API
@@ -156,8 +157,8 @@ def download1(
     :param client: client
     :return:
     """
-
-    client = q.get()
+    sz = q.qsize()
+    client = q.get_nowait()
     # starts = start // 1000  # ,
     # ends = end // 1000  # , tz=pytz.utc
     # .strftime("%Y-%m-%d %H:%M:%S")
@@ -174,15 +175,7 @@ def download1(
             klines_type=HistoricalKlinesType.SPOT,
         ),
     )
-    # klines = client.get_historical_klines(
-    #     token,
-    #     interval,
-    #     start_str=start,
-    #     end_str=end,
-    #     klines_type=HistoricalKlinesType.SPOT,
-    # )
-    # strttme = int(dateparser.parse(start).timestamp() * 1000)
-    # strd = dateparser.parse(start).astimezone(pytz.utc).timestamp() * 1000
+    
     if trade == True:
 
         client, trades = call_api(
@@ -246,10 +239,9 @@ def download1(
         df = df.apply(lambda x: str(x))
 
         klineframe = klineframe.join(df, on="date")
-
+    klineframe = klineframe.set_index("date")
     klineframe = klineframe.astype(
         {
-            "date": "datetime64[ns]",
             "open": "float64",
             "high": "float64",
             "low": "float64",
@@ -259,22 +251,40 @@ def download1(
             "VWAP": "float64",
         }
     )
-    klineframe["VWAP"] = volume_weighted_average_price(
-        klineframe["high"],
-        klineframe["low"],
-        klineframe["close"],
-        klineframe["volume"],
-        window=1444,
-        fillna=True,
-    )
-    klineframe.to_feather(f"{path}/{token}.feather")
-    # store = pd.HDFStore(f"{path}/{token}.h5")
-    # store['df'] = klineframe
-    # klineframe.to_csv(f"{path}/{token}.csv")
-    # q.put(client)
+    # klineframe["VWAP"] = volume_weighted_average_price(
+    #     klineframe["high"],
+    #     klineframe["low"],
+    #     klineframe["close"],
+    #     klineframe["volume"],
+    #     window=1444,
+    #     fillna=True,
+    # )
+    # if app:
+    #     oldframe = csvs[token]
+        # oldframe = oldframe.astype(
+        # {
+        #     "open": "float64",
+        #     "high": "float64",
+        #     "low": "float64",
+        #     "close": "float64",
+        #     "volume": "float64",
+        #     "symbol": "object",
+        #     "VWAP": "float64",
+        # })
+        # oldframe.index = oldframe["date"]
+        # klineframe.index = klineframe["date"]
+        #klineframe = pd.concat([oldframe,klineframe],axis=0)
+        #klineframe = oldframe
+    #klineframe = klineframe.drop("Unnamed: 0", axis=1)
+    if app:
+        klineframe.to_csv(f"{path}/{token}.csv",mode='a',header=False)
+    else:
+        klineframe.to_csv(f"{path}/{token}.csv")
+    
+    return klineframe
 
 
-def startdownload_1m(start, end, dir, app=False, clients=[], trades=False):
+def startdownload_1m(start, end, dir, app=False, clients=[], trades=False,csvs=None):
     """
     This is a multi-line Google style docstring.
 
@@ -301,7 +311,7 @@ def startdownload_1m(start, end, dir, app=False, clients=[], trades=False):
         ]
     else:
         currlist = getstate([], exchg,client=clients[0])
-    fuln = len(currlist) // len(clients)
+    fuln = (len(currlist) // len(clients))+1
     q = queue.SimpleQueue()
     for _ in range(fuln * 10000):
         for item in clients:
@@ -309,11 +319,11 @@ def startdownload_1m(start, end, dir, app=False, clients=[], trades=False):
     interval = Client.KLINE_INTERVAL_1MINUTE
 
     cs = len(clients) // 4
-    Parallel(n_jobs=cs, backend="threading")(
-        delayed(download1)(int(start), int(end), interval, q, dir, "1m", i, trades)
-        for i in currlist
-    )
-
+    out = Parallel(n_jobs=cs,backend="threading")(
+            delayed(download1)(int(start), int(end), interval, q, dir, "1m", i, trades,app,csvs)
+            for i in currlist
+        )
+    return out
 
 def delete_incompletes(pth):
     def import_csv(csvfilename):
@@ -387,10 +397,10 @@ def run1m(d, clilist, trades=False):
     os.mkdir(csv_path)
     dmin = d.strftime("%Y-%m-%d %H:%M:%S")
     strt = dateparser.parse("2019-01-01 00:00:00")
-    strt = "2020-01-01 00:00:00"
+    strt = "2021-01-01 00:00:00"
     strt = date_to_milliseconds(strt)
     dmin = date_to_milliseconds(dmin)
-    startdownload_1m(start=strt, end=dmin, dir=csv_path, clients=clilist, trades=trades)
+    out = startdownload_1m(start=strt, end=dmin, dir=csv_path, clients=clilist, trades=trades)
     time.sleep(30)
     # checker.degunk("1m", d.strftime("%d %B, %Y, %H:%M:%S"))
     if os.path.exists(qlib_dir):
@@ -398,68 +408,72 @@ def run1m(d, clilist, trades=False):
     os.mkdir(qlib_dir)
     for clin in clilist:
         clin.close_connection()
-    b = dump_bin.DumpDataAll(
-        csv_path=csv_path,
-        qlib_dir=qlib_dir,
-        include_fields=f"""open,high,low,close,volume,VWAP{",trades" if trades == True else ''}""",
-        freq="1min",
-        file_suffix=".feather",
-    )
+    # b = dump_bin.DumpDataAll(
+    #     csv_path=csv_path,
+    #     qlib_dir=qlib_dir,
+    #     include_fields=f"""open,high,low,close,volume,VWAP{",trades" if trades == True else ''}""",
+    #     freq="1min",
+    #     file_suffix=".feather",
+    # )
 
-    b.dump()
+    # b.dump()
 
 
 # @profile
-def append1m(d, clilist):
-    csv_path = "F:/binancedata/1m-temp"
-    if os.path.exists(csv_path):
-        shutil.rmtree(csv_path)
-    os.mkdir(csv_path)
+def append1m(d, clilist,csvs):
+    csv_path = "data/1m-raw"
+    qlib_dir = "data/1m-qlib"
+    # if os.path.exists(csv_path):
+    #     shutil.rmtree(csv_path)
+    # os.mkdir(csv_path)
     strd = d.strftime("%d %B, %Y, %H:%M:%S")
     dmin = d + timedelta(minutes=60)
     dmax = d - timedelta(days=1)
-    with open("F:/binancedata/1m-qlib/calendars/1min.txt") as f:
-        read = csv.reader(f)
-        cl = list(read)
-        last = cl[-1][0]
-    lastd = dateparser.parse(last)
+    olddl = csvs["BTCBUSD"]
+    #olddl = pd.read_feather("C:/Users/Ian/Documents/FT_2/data/1m-raw/BTCBUSD.csv")['date'].values[-1]
+    
+    # with open("F:/binancedata/1m-qlib/calendars/1min.txt") as f:
+    #     read = csv.reader(f)
+    #     cl = list(read)
+    #     last = cl[-1][0]
+    lastd = pd.to_datetime(olddl)
     # lastd = lastd - timedelta(days=1)
-    lastd = lastd - timedelta(minutes=5)
-    startdownload_1m(
-        start=lastd.strftime("%d %B, %Y, %H:%M:%S"),
-        end=dmin.strftime("%d %B, %Y, %H:%M:%S"),
+    lastd += timedelta(minutes=1)
+    strt = date_to_milliseconds(lastd.strftime("%d %B, %Y, %H:%M:%S"))
+    dmin = date_to_milliseconds(dmin.strftime("%d %B, %Y, %H:%M:%S"))
+    out = startdownload_1m(
+        start=strt,
+        end=dmin,
         dir=csv_path,
         app=True,
         clients=clilist,
+        csvs=csvs
     )
     time.sleep(1)
-    # checker.degunkapp('5m',strd)
-    # if os.path.exists(qlib_dir):
-    #     shutil.rmtree(qlib_dir)
-    # os.mkdir(qlib_dir)
+
     for clin in clilist:
         clin.close_connection()
-    if os.listdir(csv_path) != []:
-        qlib_dir = "F:/binancedata/1m-qlib/"
-        b = dump_bin.DumpDataUpdate(
-            csv_path=csv_path,
-            qlib_dir=qlib_dir,
-            include_fields="open,high,low,close,volume,VWAP,trades",
-            freq="1min",
-            max_workers=16,
-        )
-        b.dump()
+    return out
 
 
+from collections import deque
+from io import StringIO
 if __name__ == "__main__":
-    d = datetime.now(pytz.utc)
+    
     with open("C:/Users/Ian/Desktop/clients.csv",'r') as f:
         reader = csv.reader(f)
         clients = [Client(row[0],row[1]) for row in reader]
-    # clients = [
-
-
+    csvs = {}
+    for fl in os.listdir("C:/Users/Ian/Documents/FT_2/data/1m-raw/"):
         
-    # ]
+
+        with open(os.path.join("C:/Users/Ian/Documents/FT_2/data/1m-raw/",fl), 'r') as f:
+            q = deque(f, 1)  # replace 2 with n (lines read at the end)
+
+        cv = pd.read_csv(StringIO(''.join(q)), header=None).values[0][0]
+        csvs[fl.split(".")[0]] = cv
+    d = datetime.now(pytz.utc)
+    #out = append1m(d, clilist=clients,csvs=csvs)
+    #compiledata("data",append=True)
     run1m(d, clilist=clients, trades=False)
     print(f"data download and prep time elapsed: {datetime.now(pytz.utc) - d}")
