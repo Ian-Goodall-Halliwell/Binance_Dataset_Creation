@@ -32,10 +32,34 @@ def col_name(function, study_best_params):
     # Remove any trailing underscores
     col = re.sub(r"_$", "", col)
     return col
-
-
-def distance_correlation(a, b):
-    return dcor.distance_correlation(a, b)
+from scipy.stats import pearsonr, spearmanr
+from sklearn.linear_model import LinearRegression,RidgeCV,ElasticNetCV
+def distance_correlation(a, b,corr=False):
+    
+    #try:
+    #    c = spearmanr(a,b)
+    #    c = abs(c.correlation)
+    #except Exception as e:
+    #    c = 0
+    if not corr:
+        # try:
+        #     c = RidgeCV().fit(b.reshape(-1, 1),a.reshape(-1, 1)).coef_.flatten()[0]
+        # except:
+        #     c = 0
+        # try:
+        #     c = spearmanr(a,b)
+        #     try:
+        #         c = abs(c.correlation)
+        #     except:
+        #         c = abs(c.statistic)
+        # except Exception as e:
+        #     c = 0
+        c = dcor.distance_correlation(a, b)
+    else:
+        c = dcor.distance_correlation(a, b)
+    # if c > 0.5:
+    #     print('e')
+    return c
 
 
 def remove_consecutive_duplicates_and_nans(s):

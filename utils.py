@@ -133,6 +133,7 @@ def fixvolume(df):
     return df
 def ppfc(df,symbol,lep,scores,substart,end_time,start_time,fieldlist,label):
     subdf = df[df["$symbol"] == symbol].compute()
+    del df
     # #subdf = fixvolume(subdf)
     # import talib
     # fs = talib.get_function_groups()
@@ -155,7 +156,8 @@ def ppfc(df,symbol,lep,scores,substart,end_time,start_time,fieldlist,label):
     else:
         path = cache(f"{symbol}_label_cached.parquet", subdf)
     del subdf
-    #gc.collect()
+    
+    gc.collect()
     scores.update({symbol: path})
 
 def ppfc_old(df,symbol,lep,scores,substart,end_time,start_time,fieldlist,label):

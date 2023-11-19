@@ -18,17 +18,41 @@ import numpy as np
 batch_size = 1024
 smoke_test = False
 i = 5
-with open(os.path.join(WORKING_DIR, "full_data/dataset_.pkl"),"rb") as f:
-                train_x,train_y,test_x,test_y = pkl.load(f)
+with open("data_new.pkl","rb") as f:
+        train_x,train_y,test_x,test_y = pkl.load(f)
+from sklearn.preprocessing import QuantileTransformer
+train_x = train_x.xs(train_x.axes[0].levels[1][-1],level=1)
+test_x = test_x.xs(test_x.axes[0].levels[1][-1],level=1)
+train_y = train_y.xs(train_y.axes[0].levels[1][-1],level=1)
+test_y = test_y.xs(test_y.axes[0].levels[1][-1],level=1)
+train_x = train_x.dropna(how="all")
+test_x = test_x.dropna(how="all")
+train_x.replace([np.inf, -np.inf], np.nan, inplace=True)
+test_x.replace([np.inf, -np.inf], np.nan, inplace=True)
+
+train_x = train_x.fillna(method='ffill')
+test_x = test_x.fillna(method='ffill')
+train_x = train_x.fillna(0)
+test_x = test_x.fillna(0)
+train_x = train_x.dropna(how="any")
+test_x = test_x.dropna(how="any")
+train_y = train_y.reindex(train_x.index)
+test_y = test_y.reindex(test_x.index)
+train_y = train_y.sort_index()
+test_x = test_x.sort_index()
+test_y = test_y.sort_index()
+train_x = train_x.sort_index()
+# tmodel = QuantileTransformer(n_quantiles=10000, output_distribution="normal").fit(train_x)
+# X_train = tmodel.transform(train_x)
+# X_test = tmodel.transform(test_x)
 #standard = StandardScaler()
 scale = MinMaxScaler(feature_range=(-1,1)).fit(train_x)
-train_x = scale.transform(train_x)
-test_x = scale.transform(test_x)
+train_x = scale.transform(train_x).squeeze()
+test_x = scale.transform(test_x).squeeze()
 # scale = MinMaxScaler(feature_range=(-1,1)).fit(train_y[:,i].reshape(-1, 1))
 # train_y = scale.transform(train_y[:,i].reshape(-1, 1)).squeeze()
 # test_y = scale.transform(test_y[:,i].reshape(-1, 1)).squeeze()
-train_y *= 100
-test_y *= 100
+
 try:
     train_y = train_y[:,i]
     test_y = test_y[:,i]
@@ -37,7 +61,10 @@ except:
 print(test_y.std())
 print(test_y.mean())
 # print(scale.transform(np.array([0]).reshape(-1, 1)))
-train_x,train_y,test_x,test_y = torch.Tensor(train_x),torch.Tensor(train_y),torch.Tensor(test_x),torch.Tensor(test_y)
+try:
+    train_x,train_y,test_x,test_y = torch.Tensor(train_x),torch.Tensor(train_y),torch.Tensor(test_x),torch.Tensor(test_y)
+except:
+    train_x,train_y,test_x,test_y = torch.Tensor(train_x),torch.Tensor(train_y.values.squeeze()),torch.Tensor(test_x),torch.Tensor(test_y.values.squeeze())
 
 # if torch.cuda.is_available():
 #     train_x, train_y, test_x, test_y = train_x.cuda(), train_y.cuda(), test_x.cuda(), test_y.cuda()
@@ -158,13 +185,13 @@ class DeepGP(DeepGP):
 model = DeepGP(train_x.shape)
 if torch.cuda.is_available():
     model = model.cuda()
-num_epochs = 1 if smoke_test else 2
+num_epochs = 1 if smoke_test else 10
 num_samples = 3 if smoke_test else 50
 
 
 optimizer = torch.optim.Adam([
     {'params': model.parameters()},
-], lr=0.05)
+], lr=0.01)
 mll = DeepApproximateMLL(VariationalELBO(model.likelihood, model, train_x.shape[-2]))
 
 epochs_iter = tqdm.tqdm(range(num_epochs), desc="Epoch")

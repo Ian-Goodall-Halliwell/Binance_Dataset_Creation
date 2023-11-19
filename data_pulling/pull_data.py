@@ -99,11 +99,11 @@ def getstate(
         A list of tokens.
     """
     
-    store = pd.HDFStore(os.path.join("F:/binance_data", "hdf/dataset.h5"))
-    cols = store.keys()
-    store.close()
-    currlist = [x[1:] for x in cols]
-    return currlist
+    # store = pd.HDFStore(os.path.join("F:/binance_data", "hdf/dataset.h5"))
+    # cols = store.keys()
+    # store.close()
+    # currlist = [x[1:] for x in cols]
+    # return currlist
     currlist = []
     for ab in exchangeinfo["symbols"]:
         if (
@@ -127,7 +127,7 @@ def getstate(
             v = sum(v) / len(v)
             
             vv = vol * v
-            if vv > 40000000:
+            if vv > 5000000:
                 currlist.append(ab["symbol"])
         if "DEFI" in ab["symbol"]:
             currlist.append(ab["symbol"])
@@ -395,8 +395,8 @@ def run1m(d, clilist, trades=False):
     if os.path.exists(csv_path):
         shutil.rmtree(csv_path)
     os.mkdir(csv_path)
-    dmin = d.strftime("%Y-%m-%d %H:%M:%S")
-    strt = dateparser.parse("2019-01-01 00:00:00")
+    dmin = d.strftime("%Y-%m-%d %H:%M:%S") 
+    strt = dateparser.parse("2021-01-01 00:00:00")
     strt = "2021-01-01 00:00:00"
     strt = date_to_milliseconds(strt)
     dmin = date_to_milliseconds(dmin)

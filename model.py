@@ -15,8 +15,16 @@ from preprocessing import nanfill, dist
 import numpy as np
 import psutil
 import math
+import hickle as hkl
 import os
 import pickle as pkl
+from tuneta.config import talib_indicators,pandas_ta_indicators,finta_indicatrs
+from collections import OrderedDict
+import re
+import inspect
+import pandas_ta as pta
+import talib as tta
+from finta import TA as fta
 if __name__ == "__main__":
     app = False
     #import pyarrow as pa
@@ -26,7 +34,7 @@ if __name__ == "__main__":
         if not os.path.exists(WORKING_DIR):
             os.mkdir(WORKING_DIR)
         client = Client()
-        nproc = 20
+        nproc = 2
         set(scheduler="distributed", num_workers=nproc)
         labels = [
             "Ref($close, -1)/$close - 1",
@@ -69,12 +77,12 @@ if __name__ == "__main__":
             480,
             720,
             1440,
-            2880,
-            3600,
-            5760,
-            10080,
-            20160,
-            40320
+            #2880,
+            #3600,
+            #5760,
+            #10080,
+            #20160,
+            #40320
         ]
         windows = rolling_windows
         fields, names = get_fields.getfields(windows, rolling_windows)
@@ -90,9 +98,9 @@ if __name__ == "__main__":
             for i in range(intv):
                 yield (start + diff * i).strftime("%Y-%m-%d %H:%M:%S")
             yield end.strftime("%Y-%m-%d %H:%M:%S")
-        start_time = "2022-12-28 00:00:00"
+        start_time = "2019-01-05 00:00:00"
         #start_time = "2022-11-28 00:00:00"
-        end_time = "2023-03-28 00:00:00"
+        end_time = "2023-05-17 00:00:00"
         if app:
             
             start_time = pd.read_hdf(os.path.join(WORKING_DIR, "full_data/dset.h5"),"BTCBUSD",start=-1).index[-1].strftime("%Y-%m-%d %H:%M:%S")
@@ -149,9 +157,11 @@ if __name__ == "__main__":
         e = 0
         from sklearn.model_selection import train_test_split
         import pickle as pkl
-        dfs = [train_test_split(cache(df_x_[key]).dropna(how="all"),test_size=0.2,shuffle=False) for key in df_x_]
-        X_train = [x[0] for x  in dfs]
-        X_test = [x[1] for x in dfs]
+        d = train_test_split(cache(df_x_["BTCBUSD"]).index,test_size=0.2,shuffle=False)
+        X_train = [cache(df_x_[key]).dropna(how="all") for key in df_x_]
+        X_test = [cache(df_x_[key]).dropna(how="all") for key in df_x_]
+        X_train = [x.reindex(d[0]) for x  in X_train]
+        X_test = [x.reindex(d[1]) for x in X_test]
         y_train = [x["$close"].diff(periods=-60) / x["$close"] * 100 for x in X_train]
         y_test = [x["$close"].diff(periods=-60) / x["$close"] * 100 for x in X_test]
         y_train = pd.concat(y_train)
@@ -195,102 +205,177 @@ if __name__ == "__main__":
     else:
         with open("data.pkl","rb") as f:
             X_train,y_train,X_test,y_test = pkl.load(f)
+    def classif(x):
+        if x > 1:
+            return 1
+        elif x <= 0:
+            return 0
+    s = y_train.std()
+    y_train = y_train.apply(classif)
+    y_test = y_test.apply(classif)
+    
+    
+    def fix(X_):
+       # X_temp = pd.DataFrame(index=X_.resample("30T",label='right').max().index)
+        list_frames = []
+        for lvl in X_.axes[0].levels[1]:
+            X = X_.xs(lvl,level=1,drop_level=False)
+            X = X.reset_index(level=1)
+            X[["high"]] = X[["high"]].resample("30T",label='right').max()
+            X[["low"]] = X[["low"]].resample("30T",label='right').min()
+            X[["close"]] = X[["close"]].resample("30T",label='right').last()
+            X[["open"]] = X[["open"]].resample("30T",label='right').first()
+            X["volume"] = X["volume"].resample("30T",label='right').sum()
+            list_frames.append(X.dropna(axis=0,how='any'))
+        X_ = pd.concat(list_frames)
+        X_.index = pd.MultiIndex.from_tuples(((pd.to_datetime(x),y) for x,y in zip(X_.index.values, X_["symbol"].values)),names=["date","symbol"])
+        return X_
+    
+    def fix_label(X_):
+       # X_temp = pd.DataFrame(index=X_.resample("30T",label='right').max().index)
+        list_frames = []
+        for lvl in X_.axes[0].levels[1]:
+            X = X_.xs(lvl,level=1,drop_level=False)
+            X = X.reset_index(level=1)
+            X = X.resample("30T",label='right').last()
+            list_frames.append(X.dropna(axis=0,how='any'))
+        X_ = pd.concat(list_frames)
+        X_.index = pd.MultiIndex.from_tuples(((pd.to_datetime(x),y) for x,y in zip(X_.index.values, X_["symbol"].values)),names=["date","symbol"])
+        X_ = X_.drop("symbol",axis=1)
+        return X_
+    X_train = fix(X_train).dropna(axis=0,how='any')
+    X_test = fix(X_test).dropna(axis=0,how='any')
+    y_train = fix_label(y_train)
+    y_test = fix_label(y_test)
+    
+    
+    y_train = y_train.reindex(X_train.index)
+    y_test = y_test.reindex(X_test.index)
+    y_train = y_train.dropna(axis=0,how='any')
+    y_test = y_test.dropna(axis=0,how='any')
+    X_train = X_train.reindex(y_train.index)
+    X_test = X_test.reindex(y_test.index)
+    
     rolling_windows = [
+            #1,
+            2,
             3,
+            4,
             5,
             6,
+            7,
+            8,
             9,
+            10,
+            11,
             12,
+            13,
+            14,
             15,
-            30,
-            60,
-            120,
-            180,
-            240,
-            360,
-            480,
-            720,
-            1440,
-            2880,
-            3600,
-            5760,
-            10080,
-            20160,
-            40320
+            16,
+            17,
+            18,
+            19,
+            20, 
+            24,
+            32,
+            72,
+            144,
+            216,
+            288,
+            #432,
+            #576,
+            #720,
+            #1008,
+            #1440,
+            #2016,
+            #4032,
+            #2880,
+           # 3600,
+            #5760,
+            #10080,
+            #20160,
+            #40320
         ]
+    # rolling_windows = range(2,30
+    #                         )
     from tuneta.tune_ta import TuneTA
-    tt = TuneTA(n_jobs=12, verbose=True)
+    tt = TuneTA(n_jobs=4, verbose=True)
     
     
-    # import talib
-    # fs = talib.get_function_groups()
-    tt.fit(X_train, y_train,
-        indicators=['tta'],
-        ranges=rolling_windows,
-        trials=100,
-        early_stop=100,
-        min_target_correlation=.02,
-    )
     
-    # Show time duration in seconds per indicator
-    tt.fit_times()
+    end_time = X_train.axes[0].levels[0][-1]
+    start_time = end_time - timedelta(weeks=12*4)
+    
+    
+    X_train_sub = X_train.xs(slice(start_time, end_time), level=0,drop_level=False)
+    y_train_sub = y_train.xs(slice(start_time, end_time), level=0,drop_level=False)
+    retrain = True
+    import gc
+    if retrain == False:
+        
+        tt.fit(X_train_sub, y_train_sub,
+            indicators=['all'],
+            ranges=rolling_windows,
+            trials=20,
+            early_stop=100,
+            min_target_correlation=0.05,
+        )
+        gc.collect()
+        hkl.dump(tt,"tuner.hkl")
+        # with open("tuner.hkl","w") as f:
+        #     hkl.dump(tt,"tuner.hkl")
+        # Show time duration in seconds per indicator
+        tt.fit_times()
 
-    # Show correlation of indicators to target
-    tt.report(target_corr=True, features_corr=True)
+        # Show correlation of indicators to target
+        tt.report(target_corr=True)
 
-    # Select features with at most x correlation between each other
-    tt.prune(max_inter_correlation=.7)
+        
+        
+        # # Select features with at most x correlation between each other
+        tt.prune(max_inter_correlation=.99)
 
-    # Show correlation of indicators to target and among themselves
-    tt.report(target_corr=True, features_corr=True)
+        # Show correlation of indicators to target and among themselves
+        tt.report(target_corr=True,features_corr=False)
 
-    # Add indicators to X_train
-    features = tt.transform(X_train)
-    X_train = pd.concat([X_train, features], axis=1)
+        # Add indicators to X_train
+        features1 = tt.transform(X_train)
+        
+        #X_train = pd.concat([X_train, features], axis=1)
 
-    # Add same indicators to X_test
-    features = tt.transform(X_test)
-    X_test = pd.concat([X_test, features], axis=1) 
+        # Add same indicators to X_test
+        features2 = tt.transform(X_test)
+       
+        # import imblearn
+        # ccent=imblearn.under_sampling.RandomUnderSampler()
+        # #X_train = X_train.drop(["symbol"],axis=1)
+        # yidx = y_train.index.to_numpy().reshape(-1,1)
+        # yidx,y_train = ccent.fit_resample(yidx,y_train)
+        # yidx = list(x[0] for x in yidx)
+        # yidx = pd.MultiIndex.from_tuples(yidx)
+        # X_train = X_train.reindex(yidx)
+        # mn = y_train.mean()
+        # y_train.index=yidx
+        #X_test = pd.concat([X_test, features], axis=1) 
+    else:
+        with open("tuner.hkl","rb") as f:
+            tt = hkl.load(f)
+        tt.prune(max_inter_correlation=.85)
+
+        # Show correlation of indicators to target and among themselves
+        tt.report(target_corr=True)
+        features1 = tt.transform(X_train)
+       
+        #X_train = pd.concat([X_train, features], axis=1)
+
+        # Add same indicators to X_test
+        features2 = tt.transform(X_test)
+       
+        print('e')
     with open("data_new.pkl","wb") as f:
-        pkl.dump((X_train,y_train,X_test,y_test),f)
+        pkl.dump((features1,y_train,features2,y_test,tt.t_corr),f)
+    with open("data_def.pkl","wb") as f:
+        pkl.dump(pd.concat([X_train,X_test]),f)
     print('2')
-    # for key in df_x_:
-        
-    #     df_y = cache(df_y_[key]).dropna(how="all")
-    #     loaded_df = cache(df_x_[key]).dropna(how="all")
-    #     if app:
-    #         prevdata = pd.read_hdf(os.path.join(WORKING_DIR, "full_data/dset.h5"),key,start=-1).index[-1]
-    #         df_y = df_y[prevdata + timedelta(minutes=1):]
-    #         loaded_df = loaded_df[prevdata + timedelta(minutes=1):]
-    #     if not df_y.empty or not loaded_df.empty:
-    #         if not app:
-    #             df_y = df_y.parallel_apply(nanfill, axis=0)
-    #             loaded_df = loaded_df.parallel_apply(nanfill, axis=0)
-    #         if not newv:
-    #             loaded_df = loaded_df.parallel_apply(dist,args=(app,key,), axis=0).astype(np.float32)
-    #             loaded_df = pd.concat({"X": loaded_df, "y": df_y}, axis=1).astype(np.float32)
-    #         else:
-    #             loaded_df = pd.concat({"X": loaded_df, "y": df_y}, axis=1)
-    #         #loaded_df = dd.from_pandas(loaded_df,chunksize=40000)
-    #         import time
-    #         t = time.time()
-    #         if app:
-                
-                
-                
-    #             store = pd.HDFStore(os.path.join(WORKING_DIR, "full_data/dset.h5"))
-    #             if not loaded_df.empty:
-    #                 store.append(key,loaded_df,complevel=1,complib='blosc:zlib')
-    #             store.close()
-    #             #loaded_df.to_hdf(os.path.join(WORKING_DIR, "full_data/dset.h5"), key,complevel=1,complib='blosc:zlib',mode='a')
-    #         else:
-    #             loaded_df.to_hdf(os.path.join(WORKING_DIR, "full_data/dset.h5"), key,complevel=1,complib='blosc:zlib',format='table')
-    #         t -= time.time()
-    #     print(f"{key} took {t} seconds")
-           
-            #print(t)
-        #os.remove(os.path.join(WORKING_DIR, f"cache/{df_x_[key]}"))
-        #os.remove(os.path.join(WORKING_DIR, f"cache/{df_y_[key]}"))
-        
-    #pp.run()
-    #print("e")
+    

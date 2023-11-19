@@ -128,7 +128,8 @@ def eval_res(X, function, idx, trial, sym=None):
         res = eval(function)
     except Exception as e:
         print(f"Error:  Function: {function}  Parameters: {trial.params}")
-        raise Exception(e)
+        res = np.zeros_like(X.values[:,1])
+        #raise Exception(e)
     if isinstance(res, tuple):
         res = res[idx]
     res = pd.DataFrame(res, index=X.index)
@@ -157,7 +158,10 @@ def _objective(self, trial, X, y):
             eval_res(X, self.function, self.idx, trial, sym=sym)
             for sym, X in X.groupby(level=1)
         ]
-        res = pd.concat(res, axis=0).sort_index()
+        try:
+            res = pd.concat(res, axis=0).sort_index()
+        except Exception as e:
+            print(e)
     else:
         res = eval_res(X, self.function, self.idx, trial)
 
@@ -186,6 +190,8 @@ def _objective(self, trial, X, y):
             if np.all((np.array(res_tgt.results) == 0)):
                 correlation = np.nan
             else:
+                res_tgt = res_tgt.fillna(method="bfill")
+                res_tgt = res_tgt.fillna(method="ffill")
                 correlation = distance_correlation(
                     np.array(res_tgt.target), np.array(res_tgt.results)
                 )
@@ -282,7 +288,11 @@ class Optimize:
             else:
                 num_clusters = int(min([max_clusters * 2, len(correlations) / 2]))
                 ke = KElbowVisualizer(KMeans(random_state=42), k=(1, num_clusters))
-                ke.fit(correlations)
+                try:
+                    
+                    ke.fit(correlations)
+                except:
+                    return
                 num_clusters = ke.elbow_value_
                 if num_clusters is None:
                     num_clusters = int(len(correlations) * 0.2)
@@ -335,10 +345,17 @@ class Optimize:
                     ke = KElbowVisualizer(
                         KPrototypes(random_state=42), k=(1, num_clusters)
                     )
-                    ke.fit(params, categorical=[index])
+                    try:
+                        ke.fit(params, categorical=[index])
+                        
+                    except:
+                        ke.elbow_value_ = 1
                 else:
-                    ke = KElbowVisualizer(KMeans(random_state=42), k=(1, num_clusters))
-                    ke.fit(params)
+                    try:
+                        ke = KElbowVisualizer(KMeans(random_state=42), k=(1, num_clusters))
+                        ke.fit(params)
+                    except:
+                        return
                 num_clusters = ke.elbow_value_
                 if num_clusters is None:
                     num_clusters = int(len(params) * 0.2)
@@ -350,10 +367,14 @@ class Optimize:
                 kmeans = KMeans(n_clusters=num_clusters, random_state=42).fit(params)
 
             # Mean correlation per cluster, membership and score
-            cluster_mean_correlation = [
-                np.mean(trials[(kmeans.labels_ == c)].correlation)
-                for c in range(num_clusters)
-            ]
+            try:
+                cluster_mean_correlation = [
+                    np.mean(trials[(kmeans.labels_ == c)].correlation)
+                    for c in range(num_clusters)
+                ]
+            except Exception as e:
+                print(e)
+                return 
             cluster_members = [(kmeans.labels_ == c).sum() for c in range(num_clusters)]
             clusters = pd.DataFrame([cluster_mean_correlation, cluster_members]).T
             clusters.columns = ["mean_correlation", "members"]

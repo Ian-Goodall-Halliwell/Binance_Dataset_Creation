@@ -15,17 +15,18 @@ from joblib import Parallel, delayed
 from pathos.multiprocessing import ProcessPool
 from scipy.spatial.distance import squareform
 from tabulate import tabulate
-
+from joblib import Parallel,delayed
 from tuneta.config import *
 from tuneta.optimize import Optimize
 from tuneta.utils import col_name, distance_correlation
-
-
+import pickle as pkl
+import os
+import shutil
 # Distance correlation
-def dc(p0, p1):
+def dc(p0, p1,corr=False):
     df = pd.concat([p0, p1], axis=1).dropna()
     res = distance_correlation(
-        np.array(df.iloc[:, 0]).astype(float), np.array(df.iloc[:, 1]).astype(float)
+        np.array(df.iloc[:, 0]).astype(float), np.array(df.iloc[:, 1]).astype(float),corr
     )
     return res
 
@@ -46,7 +47,7 @@ class TuneTA:
         early_stop=99999,
         max_clusters=10,
         min_target_correlation=0.001,
-        remove_consecutive_duplicates=True,
+        remove_consecutive_duplicates=False,
     ):
         """
         Optimize indicator parameters to maximize correlation
@@ -57,8 +58,15 @@ class TuneTA:
         :param ranges: Parameter search space
         :param early_stop: Max number of optimization trials before stopping
         """
+        if os.path.exists("tmp"):
+            shutil.rmtree("tmp")
+            os.mkdir("tmp")
+        else:
+            os.mkdir("tmp")
         # No missing values allowed
-        if X.isna().any().any() or y.isna().any():
+        t = X.isna().any().any()
+        v = y.isna().any()
+        if X.isna().any().any() or y.isna().any().any():
             raise ValueError("X and y cannot contain missing values")
 
         if not isinstance(X.index.get_level_values(0)[0], datetime):
@@ -92,10 +100,10 @@ class TuneTA:
         # Parameters contained in config.py are tuned
 
         # Iterate user defined search space ranges
-
-        # Iterate indicators per range
-        for ind in indicators:
-
+        def indfunc(trials,remove_consecutive_duplicates,X,y,max_clusters,early_stop,ind):
+            import pandas_ta as pta
+            import talib as tta
+            from finta import TA as fta
             # Index column to optimize if indicator returns dataframe
             idx = 0
             if ":" in ind:
@@ -155,42 +163,65 @@ class TuneTA:
             fn += ")"
 
             # Only optimize indicators that contain tunable parameters
+            def f_(fn,trials,remove_consecutive_duplicates,X,y,idx,max_clusters,verbose,early_stop,range_,single=False):
+                if single:
+                    result = Optimize(
+                        function=fn,
+                        n_trials=1,
+                        remove_consecutive_duplicates=remove_consecutive_duplicates,
+                    ).fit(
+                    X,
+                    y,
+                    idx=idx,
+                    max_clusters=max_clusters,
+                    verbose=verbose,
+                    early_stop=early_stop)
+                    fnnew = hash(fn)
+                    with open(f"tmp/{fn}.pkl","wb") as f:
+                        pkl.dump(result,f)
+                    return f"tmp/{fn}.pkl"
+                else:
+                    nt = 2 if "lookahead" in fn else 1 
+                    result = Optimize(
+                        function=fn.replace(f"{ranges}",f"[{range_}]") if fn.count('=') == 1 else fn.replace(f"'timeperiod', {ranges}",f"'timeperiod', [{range_}]").replace(f"'length', {ranges}",f"'length', [{range_}]"),
+                        n_trials= 1 if fn.count('=') == nt or single else trials,
+                        remove_consecutive_duplicates=remove_consecutive_duplicates,
+                    ).fit(
+                    X,
+                    y,
+                    idx=idx,
+                    max_clusters=max_clusters,
+                    verbose=verbose,
+                    early_stop=early_stop)
+                    fnnew = hash(fn.replace(f"{ranges}",f"[{range_}]") if fn.count('=') == 1 else fn.replace(f"'timeperiod', {ranges}",f"'timeperiod', [{range_}]").replace(f"'length', {ranges}",f"'length', [{range_}]"))
+                    with open(f"tmp/{fnnew}.pkl","wb") as f:
+                        pkl.dump(result,f)
+                    return f"tmp/{fnnew}.pkl" 
+            out = []
             if suggest:
-                self.fitted.append(
-                    pool.apipe(
-                        Optimize(
-                            function=fn,
-                            n_trials=trials,
-                            remove_consecutive_duplicates=remove_consecutive_duplicates,
-                        ).fit,
-                        X,
-                        y,
-                        idx=idx,
-                        max_clusters=max_clusters,
-                        verbose=self.verbose,
-                        early_stop=early_stop,
-                    )
-                )
+                for range_ in ranges:
+                    out.append(f_(fn,trials,remove_consecutive_duplicates,X,y,idx,max_clusters,self.verbose,early_stop,range_))
+                return out
             else:
-                self.fitted.append(
-                    pool.apipe(
-                        Optimize(
-                            function=fn,
-                            n_trials=1,
-                            remove_consecutive_duplicates=remove_consecutive_duplicates,
-                        ).fit,
-                        X,
-                        y,
-                        idx=idx,
-                        max_clusters=max_clusters,
-                        verbose=self.verbose,
-                        early_stop=early_stop,
-                    )
-                )
-
+                out.append(f_(
+                    fn,trials,remove_consecutive_duplicates,X,y,idx,max_clusters,self.verbose,early_stop,0,True
+                    ))
+                return out
+                    
+        # Iterate indicators per range
+        with Parallel(n_jobs=self.n_jobs, backend="loky") as parallel:
+            self.fitted = parallel(delayed(indfunc)(trials,remove_consecutive_duplicates,X,y,max_clusters,early_stop,ind) for ind in indicators)
+        
+        def loadcache(pth):
+            with open(pth,"rb") as f:
+                return pkl.load(f)
         # Blocking wait to retrieve results
-        self.fitted = [fit.get() for fit in self.fitted]
-
+        #self.fitted = [fit.get() for fit in self.fitted]
+        for en, f in enumerate(self.fitted):
+            for e, ff in enumerate(f):
+                self.fitted[en][e] = loadcache(self.fitted[en][e])
+        self.fitted = [v for f in self.fitted for v in f if f is not None]
+        self.fitted = [f for f in self.fitted if f is not None]
         # Fits must contain best trial data
         self.fitted = [f for f in self.fitted if len(f.study.user_attrs) > 0]
 
@@ -330,12 +361,14 @@ class TuneTA:
 
         # Feature must be same size for correlation and of type float
         start = max([f.first_valid_index() for f in features])
-        features = [(f[f.index >= start]).astype(float) for f in features]
+        for e,f in enumerate(features):
+            features[e] = (f[f.index >= start]).astype(float)
+        #features = [(f[f.index >= start]).astype(float) for f in features]
 
         # Inter Correlation
         pair_order_list = itertools.combinations(features, 2)
-        correlations = Parallel(n_jobs=self.n_jobs)(
-            delayed(dc)(p[0], p[1]) for p in pair_order_list
+        correlations = Parallel(n_jobs=self.n_jobs,backend="loky")(
+            delayed(dc)(p[0], p[1],True) for p in pair_order_list
         )
         correlations = squareform(correlations)
         self.f_corr = pd.DataFrame(correlations, columns=fns, index=fns)
